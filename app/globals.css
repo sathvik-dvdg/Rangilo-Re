@@ -1,0 +1,119 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-cinzel: 'Cinzel Variable';
+  --font-nunito: 'Nunito Variable';
+  --ink: #1a1410;
+  --paper: #f3eadb;
+  --haldi: #d8a23a;
+  --kumkum: #b23a2e;
+}
+
+html {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+body {
+  @apply font-sans antialiased bg-ink text-paper;
+}
+
+/* Lenis */
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+.lenis.lenis-stopped {
+  overflow: hidden;
+}
+
+@media (pointer: fine) {
+  body.has-custom-cursor,
+  body.has-custom-cursor a,
+  body.has-custom-cursor button {
+    cursor: none;
+  }
+}
+
+@layer components {
+  /* Paper grain: a quiet SVG noise so flat fills don't look rendered. */
+  .grain {
+    position: relative;
+    isolation: isolate;
+  }
+  .grain::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: -1;
+    opacity: 0.07;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  }
+
+  /* Bandhani: tie-dye dot grid used as a texture, never as decoration noise. */
+  .bandhani {
+    background-image: radial-gradient(circle at center, rgba(243, 234, 219, 0.14) 1.2px, transparent 1.6px);
+    background-size: 14px 14px;
+  }
+  .bandhani-dark {
+    background-image: radial-gradient(circle at center, rgba(26, 20, 16, 0.16) 1.2px, transparent 1.6px);
+    background-size: 14px 14px;
+  }
+
+  /* Stitched hairline, like a running stitch on a chaniya hem. */
+  .stitch-b {
+    border-bottom: 1px dashed rgba(216, 162, 58, 0.45);
+  }
+  .stitch {
+    border: 1px dashed rgba(216, 162, 58, 0.45);
+  }
+
+  /* Border that slowly cycles haldi → kumkum, used on the unlocked identity card. */
+  .thread-border {
+    border: 1px solid transparent;
+    background:
+      linear-gradient(var(--ink), var(--ink)) padding-box,
+      linear-gradient(90deg, #d8a23a, #b23a2e, #d8a23a, #b23a2e) border-box;
+    background-size: 100% 100%, 200% 100%;
+    animation: thread 4s linear infinite;
+  }
+
+  .shimmer {
+    background: linear-gradient(100deg, transparent 20%, rgba(243, 234, 219, 0.28) 50%, transparent 80%);
+    background-size: 200% 100%;
+    animation: shine 1.8s linear infinite;
+  }
+
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@keyframes thread {
+  from {
+    background-position: 0% 0%, 0% 50%;
+  }
+  to {
+    background-position: 0% 0%, 200% 50%;
+  }
+}
+
+@keyframes shine {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+::selection {
+  background: var(--haldi);
+  color: var(--ink);
+}
