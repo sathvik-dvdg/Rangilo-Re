@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { auth } from '@clerk/nextjs/server';
+import { getClerkConfigProblems } from '@/lib/clerkConfig';
 import { ChatRoom } from '@/components/chat/ChatRoom';
 import { HttpError, getRoomState } from '@/lib/server';
 import { buttonVariants } from '@/components/ui/button';
@@ -9,6 +10,8 @@ import { Diya } from '@/components/chat/TimerExpiredOverlay';
 export const dynamic = 'force-dynamic';
 
 export default async function ChatPage({ params }: { params: { roomId: string } }) {
+  // The root layout shows the setup screen; don't call auth() without valid keys.
+  if (getClerkConfigProblems().length > 0) return null;
   const { userId } = auth();
   if (!userId) redirect('/sign-in');
 
