@@ -32,7 +32,8 @@ npm run dev
 ### 1. Clerk
 
 1. Create an application at [dashboard.clerk.com](https://dashboard.clerk.com) and copy the publishable and secret keys into `.env.local`.
-2. Turn on the **Supabase integration** (Clerk Dashboard → Integrations → Supabase). This adds the `role: authenticated` claim that Supabase needs.
+2. If the keys are missing or still placeholders, every page shows a "Clerk isn't set up yet" screen listing what's wrong, and API routes return `503`. Values in `.env.local` override `.env`, and you need to restart `npm run dev` after editing either one.
+3. Turn on the **Supabase integration** (Clerk Dashboard → Integrations → Supabase). This adds the `role: authenticated` claim that Supabase needs.
 
 ### 2. Supabase
 
