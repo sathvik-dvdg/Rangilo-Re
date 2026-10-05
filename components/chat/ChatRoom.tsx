@@ -73,14 +73,20 @@ export function ChatRoom({ initial }: { initial: RoomState }) {
   const bothSpoke =
     messages.some((m) => m.sender_id === me.clerk_id && !m.pending) && messages.some((m) => m.sender_id === partner.clerk_id);
   const startRequested = useRef(false);
+  const [startRetry, setStartRetry] = useState(0);
   useEffect(() => {
     if (timerStartedAt || startRequested.current || !partnerHere || !bothSpoke) return;
     startRequested.current = true;
+    // If the server isn't ready yet (e.g. 409 while a message is still committing), retry shortly.
+    const retryLater = () => {
+      startRequested.current = false;
+      window.setTimeout(() => setStartRetry((n) => n + 1), 2000);
+    };
     fetch(`/api/rooms/${encodeURIComponent(roomId)}/timer`, { method: 'POST' })
       .then((r) => r.json())
-      .then((d) => d.timerStartedAt && setTimerStartedAt(d.timerStartedAt))
-      .catch(() => (startRequested.current = false));
-  }, [timerStartedAt, partnerHere, bothSpoke, roomId]);
+      .then((d) => (d.timerStartedAt ? setTimerStartedAt(d.timerStartedAt) : retryLater()))
+      .catch(retryLater);
+  }, [timerStartedAt, partnerHere, bothSpoke, roomId, startRetry]);
 
   // Read receipts: mark partner's messages read while the tab is visible.
   const unread = messages.some((m) => m.sender_id === partner.clerk_id && !m.read_by?.includes(me.clerk_id));

@@ -1,6 +1,7 @@
 import 'server-only';
 import { auth } from '@clerk/nextjs/server';
 import { supabaseAdmin } from './supabaseAdmin';
+import { diagnoseDbError } from './dbDiagnosis';
 import { FREE_CHAT_MS, partnerFromRoomId } from './room';
 import type { PublicProfile, RoomState } from './types';
 
@@ -21,6 +22,11 @@ export function requireUserId() {
 export function errorResponse(e: unknown) {
   if (e instanceof HttpError) return Response.json({ error: e.message }, { status: e.status });
   console.error(e);
+  const d = diagnoseDbError(e);
+  if (d) {
+    const problems = d.problems.map((p) => `${p.variable} ${p.reason}`);
+    return Response.json({ error: `${d.title}. ${d.hint}`, problems }, { status: 503 });
+  }
   return Response.json({ error: 'Something went wrong' }, { status: 500 });
 }
 

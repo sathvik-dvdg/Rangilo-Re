@@ -68,9 +68,12 @@ export function Dashboard({ me, suggestedName }: { me: PublicProfile | null; sug
   useEffect(() => {
     if (!me) return;
     fetch('/api/users')
-      .then((r) => (r.ok ? r.json() : Promise.reject(r)))
-      .then((d) => setUsers(d.users))
-      .catch(() => setError('Could not load dancers. Pull to refresh or try again in a moment.'));
+      .then(async (r) => {
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error ?? 'Could not load dancers. Try again in a moment.');
+        setUsers(d.users);
+      })
+      .catch((e: Error) => setError(e.message || 'Could not load dancers. Try again in a moment.'));
   }, [me]);
 
   const visible = useMemo(() => {

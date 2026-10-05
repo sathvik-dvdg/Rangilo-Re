@@ -39,7 +39,8 @@ npm run dev
 
 1. Create a project and copy the URL, the anon key and the service-role key.
 2. Under **Authentication → Sign In / Providers → Third-party auth**, add **Clerk** and paste your Clerk domain. Browser requests then carry the Clerk session token, and RLS reads the Clerk user id from `auth.jwt()->>'sub'`.
-3. Run `supabase/migrations/0001_init.sql` in the SQL editor. It creates the tables, RLS policies and the Realtime publication.
+3. Set `NEXT_PUBLIC_SUPABASE_URL` to the **Project URL** only (`https://<ref>.supabase.co`). Don't add `/rest/v1` and don't use the dashboard link. If the URL or keys are wrong, or the tables are missing, `/dashboard` and `/chat` show a screen saying exactly which one, and API routes return `503`.
+4. Run `supabase/migrations/0001_init.sql` in the SQL editor. It creates the tables, RLS policies and the Realtime publication.
 
 ### 3. Razorpay
 
