@@ -295,21 +295,21 @@ Classification of what exists today. "Implemented — unverified" means the code
 - **Risks:** Shipping the rollback-continuity path before the ledger exists would let signed-but-unexpected events grant entitlements. Building the Free Mode gate (no grants) does not depend on the ledger and should come first.
 
 #### FREE-005 — Coherent chat expiry in Free Mode
-- **Requirement:** When a Free Mode chat expires, the participants see a clear end state defined by DEC-001 (for example: chat closed, history readable, option to start over is not offered, or a free mutual-consent extension).
-- **Why:** The current overlay's only action is a ₹29 payment.
-- **Files:** `components/chat/TimerExpiredOverlay.tsx`, `ChatRoom.tsx`.
+- **Requirement (DEC-001 decided 2026-10-13):** When a Free Mode chat expires, the history stays readable and each participant may choose "keep talking". The server grants +2 minutes only once **both** participants have agreed for that expiry; either may decline, and a decline or no response leaves the chat closed. Extension requests and agreements are recorded server-side and are free.
+- **Why:** The current overlay's only action is a ₹29 payment; extending a conversation with someone needs both people's agreement.
+- **Files:** `components/chat/TimerExpiredOverlay.tsx`, `ChatRoom.tsx`; server grant should reuse `chat_extensions` with a non-payment source (new migration, DATA-001).
 - **Status:** Missing.
-- **Depends on:** DEC-001, FREE-003.
-- **Acceptance:** Expired room shows the decided state; no paid affordance; server behaviour matches the UI.
-- **Evidence:** TEST-007.
+- **Depends on:** FREE-003, DATA-001. Open: limit on the number of free extensions per room; whether a one-sided request expires.
+- **Acceptance:** Tests: one agreement → no extra time; both agree → exactly +120 s, granted once even under concurrent requests; a request by a non-participant → 403; decline → chat remains closed; no paid affordance.
+- **Evidence:** TEST-003, TEST-007.
 - **Risks:** —
 
 #### FREE-006 — Identity sharing in Free Mode follows the consent model
-- **Requirement:** If identity sharing exists in Free Mode (DEC-002), it is the mutual-consent flow of ID-001…ID-004. No payment is involved.
+- **Requirement (DEC-002 decided 2026-10-13):** Identity sharing is free, mutual and opt-in, as specified in ID-001…ID-004. No payment is involved.
 - **Why:** Identity sharing is a safety feature first; it must not be gated by payment.
 - **Files:** none yet.
-- **Status:** Planned.
-- **Depends on:** DEC-002, ID-001…ID-004.
+- **Status:** Missing.
+- **Depends on:** ID-001…ID-004.
 - **Acceptance:** See ID-001.
 - **Evidence:** See ID-001.
 - **Risks:** —
@@ -449,7 +449,7 @@ Classification of what exists today. "Implemented — unverified" means the code
 
 ## 7. Paid Mode objectives and acceptance criteria
 
-Everything in this section is **inactive until Paid Mode is effective** (CFG-002) and the §8 gates pass. The reported concept is ₹29 per optional digital feature (chat extension; identity sharing). That price and those products are **proposals, not approved business decisions** (DEC-002, DEC-004).
+Everything in this section is **inactive until Paid Mode is effective** (CFG-002) and the §8 gates pass. The reported concept was ₹29 per optional digital feature (chat extension; identity sharing). Per DEC-002 (2026-10-13) identity sharing is free and is **not** a paid product. A paid chat extension and its price remain **proposals, not approved business decisions** (DEC-004, DEC-010), and must coexist with the free mutual extension (FREE-005).
 
 **Payment verification ≠ entitlement fulfilment.** Verifying a payment proves money moved for a server-created order. Fulfilment is a separate step that re-checks whether the entitlement may still be granted (room exists, users not blocked, consent present). A verified payment that cannot be fulfilled goes to a recoverable state and, if necessary, a refund — it never forces the grant.
 
@@ -728,7 +728,7 @@ Razorpay onboarding and product eligibility are **unresolved**. The ability to c
 - **Risks:** —
 
 #### ID-002 — Consent independent of payment
-- **Requirement:** No payment, entitlement, or webhook can create, imply or substitute for consent. If any paid identity-related product is ever approved (DEC-002), it may pay only for something that does not itself disclose without consent, and must be refundable if consent is declined.
+- **Requirement:** No payment, entitlement, or webhook can create, imply or substitute for consent. Per DEC-002 there is no paid identity product; introducing one would require a new owner decision recorded here, and it could never itself disclose without consent.
 - **Files:** `lib/payments.ts` reveal branch.
 - **Status:** **Conflicts.**
 - **Depends on:** DEC-002.
@@ -746,10 +746,12 @@ Razorpay onboarding and product eligibility are **unresolved**. The ability to c
 - **Risks:** —
 
 #### ID-004 — Mutual-exchange option
-- **Requirement (Proposed default for DEC-002):** Identity is shared only when both participants have opted in, then simultaneously.
-- **Status:** Planned.
-- **Depends on:** DEC-002.
-- **Acceptance / Evidence:** Defined when DEC-002 is decided.
+- **Requirement (DEC-002 decided 2026-10-13):** Each participant chooses which fields to share (e.g. name, or a contact handle instead of email). Nothing is shown to either side until both have opted in; then each sees only what the other chose. Opting in is free, and no paid product discloses identity.
+- **Files:** replaces the payer-only `reveals`/`getRevealed` flow (`lib/server.ts:88-105`, `lib/payments.ts:37-49`).
+- **Status:** Missing.
+- **Depends on:** ID-001, ID-003, DATA-001; DEC-003 for existing `reveals` rows.
+- **Acceptance:** Tests: A opts in, B has not → neither sees anything; both opt in → each sees only the other's chosen fields; a third user and the payment flow cannot create or read an opt-in.
+- **Evidence:** TEST-003.
 - **Risks:** —
 
 #### SAFE-001 — Blocking
@@ -771,11 +773,11 @@ Razorpay onboarding and product eligibility are **unresolved**. The ability to c
 - **Risks:** —
 
 #### SAFE-003 — Age safeguards
-- **Requirement:** An age policy (DEC-005) is defined and enforced at onboarding. If minors are excluded, users affirm age ≥ 18 with a clear statement; if minors may use the service, verifiable parental consent and other obligations for children's data must be assessed before launch.
-- **Files:** `OnboardingModal.tsx`, `actions.ts`.
+- **Requirement (DEC-005 decided 2026-10-13):** GarbaConnect is 18+ only. Onboarding requires an explicit self-declaration that the user is 18 or older, with a clear statement of the policy; the server rejects onboarding without it and records the declaration time. No date of birth is collected. The policy is subject to confirmation by the GATE-008 legal review.
+- **Files:** `components/dashboard/OnboardingModal.tsx`, `app/(main)/dashboard/actions.ts` (`completeOnboarding`); new column via migration (DATA-001).
 - **Status:** Missing.
-- **Depends on:** DEC-005, GATE-008.
-- **Acceptance:** Onboarding cannot complete without the age step; policy published.
+- **Depends on:** DATA-001; GATE-008 confirmation.
+- **Acceptance:** Calling `completeOnboarding` without the declaration fails server-side; the UI cannot proceed without it; Terms state the 18+ policy.
 - **Evidence:** TEST-007; legal sign-off.
 - **Risks:** Social discovery between strangers with no age gate is a significant safety and legal risk.
 
@@ -901,10 +903,10 @@ At baseline there is **no test framework, no test file and no CI**. Choosing a f
 A phase is complete only when its exit criteria have **evidence**; planning or documentation alone does not complete a phase.
 
 **Phase 0 — Baseline and verification** *(in progress: this document)*
-- Exit: TEST-001, TEST-006 (typecheck/lint/build), TEST-005 skeleton; live database schema compared with `0001_init.sql` (DATA-001); DEC-001, DEC-002, DEC-003, DEC-005 decided.
+- Exit: TEST-001, TEST-006 (typecheck/lint/build), TEST-005 skeleton; live database schema compared with `0001_init.sql` (DATA-001); DEC-001, DEC-002, DEC-005 decided (done 2026-10-13); DEC-003 decided.
 
 **Phase 1 — Free Mode stabilisation** *(depends on Phase 0)*
-- CFG-001…005, FREE-001…005, FREE-007; remove the payer-only reveal path (PRIV-001, ID-002) and fix copy (PRIV-006, ONB-002); SAFE-001, SAFE-002, SAFE-003, CHAT-003, CHAT-004, CHAT-007, PRIV-005; FREE-006/ID-001…004 if DEC-002 includes identity sharing in Free Mode; TEST-002, TEST-003, TEST-005, TEST-007.
+- CFG-001…005, FREE-001…005, FREE-007; remove the payer-only reveal path (PRIV-001, ID-002) and fix copy (PRIV-006, ONB-002); SAFE-001, SAFE-002, SAFE-003, CHAT-003, CHAT-004, CHAT-007, PRIV-005; FREE-006/ID-001…004 (mutual opt-in identity sharing, per DEC-002); TEST-002, TEST-003, TEST-005, TEST-007.
 - Exit: Free Mode smoke and authorization suites pass in CI; no Conflicts status remains.
 
 **Phase 2 — Billing architecture in test mode** *(depends on Phase 1; real payment acceptance stays disabled)*
@@ -944,11 +946,11 @@ A phase is complete only when its exit criteria have **evidence**; planning or d
 
 | ID | Decision | Notes / recommendation |
 |---|---|---|
-| **DEC-001** | Free Mode chat expiry: hard end, free extension (e.g. both agree to +2 min), or other; and whether "both present" stays a timer condition | Must be decided before FREE-003/005 |
-| **DEC-002** | Identity-sharing model: does it exist, what fields (email vs a chosen contact handle), mutual or one-way, ever paid? | Recommendation: free, mutual, opt-in, field-level choice. A paid identity product is not recommended. |
+| **DEC-001** | Free Mode chat expiry | **Decided 2026-10-13 (project owner):** free mutual extension, both must agree, +2 min (FREE-005). Still open: cap on free extensions per room; whether "both present" stays a timer-start condition (CHAT-003). |
+| **DEC-002** | Identity-sharing model | **Decided 2026-10-13 (project owner):** free, mutual, opt-in, field-level choice; never paid (FREE-006, ID-004). The paid "reveal" product is withdrawn. |
 | **DEC-003** | Treatment of existing `reveals` rows created without consent | Recommendation: stop displaying them; establish whether any **live** payments exist (*Information Required*) and refund if so |
 | **DEC-004** | Extension rules: who may buy, before/after timer start, how many, does the partner need to agree | Currently: either participant, any time, unlimited, no partner consent |
-| **DEC-005** | Age policy (18+ only?) and how it is affirmed | Needs GATE-008 input |
+| **DEC-005** | Age policy | **Decided 2026-10-13 (project owner):** 18+ only, self-declaration at onboarding, no date of birth collected (SAFE-003). Subject to GATE-008 confirmation. |
 | **DEC-006** | Retention periods for messages, profiles and reports after the season | — |
 | **DEC-007** | Refund policy | Required for GATE-004 |
 | **DEC-008** | Landing stats and testimonials: replace with real data or remove | — |
@@ -993,8 +995,8 @@ Status abbreviations: **V** Verified · **IU** Implemented — unverified · **P
 | FREE-002 | No gateway contact | `useRazorpay.ts` | P | TEST-007 | Hide CTAs | FREE-003 |
 | FREE-003 | No paid UI/claims | chat, modals, landing | M | TEST-007 | Replace per decisions | DEC-001/002 |
 | FREE-004 | Billing endpoints inert; webhook grants only verified paid-era ledger orders | `app/api/payment/*`, webhook | M | TEST-004 | Gate first (no grants in Free Mode); continuity path after ledger | CFG-001; PAY-003/006/011 for continuity |
-| FREE-005 | Coherent expiry | `TimerExpiredOverlay.tsx` | M | TEST-007 | Build decided state | DEC-001 |
-| FREE-006 | Free identity sharing via consent | — | Pl | TEST-003 | Await DEC-002 | ID-001 |
+| FREE-005 | Free mutual +2 min extension at expiry | `TimerExpiredOverlay.tsx` | M | TEST-003, TEST-007 | Build mutual-agreement flow | DATA-001; cap open |
+| FREE-006 | Free identity sharing via consent | — | M | TEST-003 | Build with ID-004 | ID-001…004 |
 | FREE-007 | Non-destructive switching | `extraSecondsFor` | IU | integration test | Write test | DEC-003 |
 | FREE-008 | Config ≠ approval | process | M | change record | Adopt §20 | GATE-* |
 | AUTH-001 | Auth on all surfaces | `middleware.ts`, `requireUserId` | IU | TEST-003 | Route-table test | — |
@@ -1044,10 +1046,10 @@ Status abbreviations: **V** Verified · **IU** Implemented — unverified · **P
 | ID-001 | Consent before disclosure | — | **C** | TEST-003 | Build consent model | DEC-002 |
 | ID-002 | Consent ≠ payment | `payments.ts` | **C** | TEST-004 | Remove paid reveal | DEC-002 |
 | ID-003 | Informed, scoped, revocable | — | M | review | Design | DEC-002 |
-| ID-004 | Mutual exchange | — | Pl | — | Await DEC-002 | DEC-002 |
+| ID-004 | Mutual, field-level opt-in exchange | — | M | TEST-003 | Design data model + flow | ID-001, DATA-001, DEC-003 |
 | SAFE-001 | Blocking | — | M | TEST-003 | Build | DATA-001 |
 | SAFE-002 | Reporting | — | M | test + runbook | Build | DATA-001 |
-| SAFE-003 | Age safeguards | — | M | TEST-007 | Build | DEC-005 |
+| SAFE-003 | 18+ self-declaration at onboarding | `OnboardingModal.tsx`, `actions.ts` | M | TEST-003, TEST-007 | Build | DATA-001; GATE-008 |
 | SAFE-004 | Abuse prevention | — | M | refs | — | CHAT-004/007 |
 | DATA-001 | Migrations only | `supabase/migrations/` | P | schema diff | Adopt CLI | IR: live DB |
 | DATA-002 | Entitlement linkage | migration | P | TEST-005 | With PAY-003 | PAY-003 |
