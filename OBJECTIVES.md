@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | Baseline v1 — established 2026-10-12 from a read-only review of commit `3b75369` |
+| Status | Baseline v1 — established 2026-10-12 from a read-only review of commit `3b75369`. Updated 2026-10-13: decisions DEC-001/002/005; billing gate (CFG-001…003, FREE-004) and test runner (TEST-001). |
 | Owner | Project owner (product decisions) · whoever edits code (keeping this file accurate) |
 | Authority | This file is the authoritative specification for product behaviour, security boundaries and readiness gates. The source code is the authority on *current* behaviour. Where they disagree, the disagreement is recorded here as a gap, not silently resolved. |
 | Agent rules | [`CLAUDE.md`](CLAUDE.md) requires every coding task to consult this file. |
@@ -71,7 +71,7 @@ At baseline **no objective is Verified**: the repository has no test suite and n
 | Payments | `razorpay` `^2.9.8` server SDK + Checkout.js loaded from `checkout.razorpay.com` at click time |
 | Client state | Zustand 5 (`store/useAppStore.ts`) |
 | Lists | `react-window` (dashboard) |
-| Scripts | `dev`, `build`, `start`, `lint` (`next lint`), `typecheck` (`tsc --noEmit`). **No `test` script.** |
+| Scripts | `dev`, `build`, `start`, `lint` (`next lint`), `typecheck` (`tsc --noEmit`), `test` (`vitest run`, added 2026-10-13). |
 | CI / deployment config | **None in repo.** No `.github/`, no `vercel.json`. README says "Push to Vercel" — hosting is *Information Required*. |
 
 ### 3.2 Request and data flow — Verified (source)
@@ -119,7 +119,7 @@ Realtime publication: `messages`, `rooms`, `chat_extensions`. No `payments`/`ord
 
 ### 3.5 Environment variables — Verified (source), names only
 
-`.env.example` defines: `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, four `NEXT_PUBLIC_CLERK_*_URL` vars, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, `NEXT_PUBLIC_RAZORPAY_KEY_ID`. `.env` and `.env*.local` are gitignored. **No `BILLING_MODE` variable exists anywhere in the code.**
+`.env.example` defines: `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, four `NEXT_PUBLIC_CLERK_*_URL` vars, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, `NEXT_PUBLIC_RAZORPAY_KEY_ID`. `.env` and `.env*.local` are gitignored. `BILLING_MODE` (added 2026-10-13, documented in `.env.example`) is read only by `lib/billing.ts`.
 
 ---
 
@@ -148,7 +148,7 @@ Classification of what exists today. "Implemented — unverified" means the code
 | Real name / email privacy from other browsers | Implemented — unverified | RLS own-row only; API selects public columns. |
 | Identity sharing | **Conflicts** | Payer's ₹29 discloses target's real name + email with no consent from the target (`lib/server.ts:88-105`, `lib/payments.ts:37-49`). |
 | Chat extension | Partial (paid only) | `chat_extensions`; no free path; purchasable before the timer starts, unlimited. |
-| Billing mode (free/paid) | Missing | No concept exists. Payment routes and ₹29 CTAs are always active. |
+| Billing mode (free/paid) | Partial | `lib/billing.ts`; payment routes and chat payment UI gated (tests pass). Landing copy still advertises ₹29. |
 | Payment order creation | Partial | Server-fixed amount/currency; no persisted order record. |
 | Payment verification | Partial | Signature + order ownership; no authoritative payment-status fetch. |
 | Webhook processing | Partial | Raw-body signature; `payment.captured` only; no event dedup, refund handling or failure state. |
@@ -198,38 +198,38 @@ Classification of what exists today. "Implemented — unverified" means the code
 #### CFG-001 — Billing mode resolution
 - **Requirement:** A single server-only module (proposed `lib/billing.ts`, `import 'server-only'`) resolves the effective mode from `BILLING_MODE`. Rules: unset or empty → `free`; exactly `paid` (trimmed, case-insensitive) → *requested* paid; any other value → `free` **and** a logged configuration error. No other code reads `BILLING_MODE` directly.
 - **Why:** Requirements 1–3 of the Free Mode decision: missing or invalid values must never enable Paid Mode.
-- **Files:** none yet. Must not be a `NEXT_PUBLIC_*` variable (those are inlined at build time and visible to clients).
-- **Status:** Missing.
+- **Files:** `lib/billing.ts` (`resolveRequestedMode`, `getBillingStatus`; `import 'server-only'`). Not a `NEXT_PUBLIC_*` variable; a bundle scan found no `BILLING_MODE` in `.next/static`.
+- **Status:** Verified (unit level).
 - **Depends on:** —
 - **Acceptance:** Unit test table: `undefined`, `""`, `"free"`, `"FREE"`, `"paid "`, `"Paid"`, `"true"`, `"1"`, `"premium"` resolve as specified; invalid values emit exactly one error log.
-- **Evidence:** TEST-002.
+- **Evidence:** TEST-002 — `tests/billing.test.ts` "CFG-001" cases cover every input in the acceptance table plus extras; one-log-only and no-value-echo asserted. Evidence (2026-10-13, branch `feat/free-mode-billing-gate`): `npm test` 51/51 passed locally. Not yet run in CI (TEST-006).
 - **Risks:** —
 
 #### CFG-002 — Paid Mode fails closed
 - **Requirement:** Effective mode is `paid` only if mode is requested as paid **and** a readiness check passes: `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` present and well-formed, `NEXT_PUBLIC_RAZORPAY_KEY_ID` equals `RAZORPAY_KEY_ID`, and key prefix matches the environment (`rzp_live_` only in production, see DEP-001). If the check fails, paid features are unavailable (treated as free for UI, 503 for billing endpoints) and a configuration error is logged. Nothing is granted.
 - **Why:** Requirement 4. A half-configured paid deployment must not take money it cannot verify.
-- **Files:** `lib/razorpay.ts` (currently uses `process.env.X!` with no validation).
-- **Status:** Missing.
+- **Files:** `lib/billing.ts` (`checkPaidReadiness`, `billingDisabledResponse`); `lib/razorpay.ts` (`razorpay()` refuses to build a client unless effective mode is `paid`).
+- **Status:** Partial. All readiness checks implemented and tested. Gap: "live keys only in production" is enforced by `NODE_ENV === 'production'`, which preview deployments also satisfy; a stricter environment check needs DEP-001.
 - **Depends on:** CFG-001.
 - **Acceptance:** Tests for each missing/malformed variable show effective mode ≠ `paid`, billing endpoints return 503 without constructing a Razorpay client.
-- **Evidence:** TEST-002.
+- **Evidence:** TEST-002 — `tests/billing.test.ts` "CFG-002" (each missing/placeholder/malformed/mismatched variable, live key outside production, no values in logs); `tests/payment-routes.test.ts` "Paid Mode requested but not ready" (503, no Razorpay client, nothing granted). Evidence (2026-10-13, branch `feat/free-mode-billing-gate`): passed locally.
 - **Risks:** —
 
 #### CFG-003 — Credentials never imply Paid Mode
 - **Requirement:** The presence of valid Razorpay credentials has no effect when `BILLING_MODE` is not `paid`.
 - **Why:** Requirement 3. Test keys sitting in an `.env` must not switch on payments.
-- **Files:** Today every payment route runs whenever it is called (`app/api/payment/*`), so the current behaviour is effectively "credentials ⇒ paid".
-- **Status:** Conflicts.
+- **Files:** `lib/billing.ts`; gates in `app/api/payment/create-order/route.ts`, `verify/route.ts`, `app/api/webhooks/razorpay/route.ts`. (Before 2026-10-13 every payment route ran whenever called.)
+- **Status:** Verified (route level). The end-to-end Free Mode smoke test (TEST-007) is still outstanding.
 - **Depends on:** CFG-001, FREE-004.
 - **Acceptance:** With full valid test credentials and `BILLING_MODE` unset, `create-order` returns the Free Mode response and no Razorpay API call is made.
-- **Evidence:** TEST-002, TEST-007.
+- **Evidence:** `tests/billing.test.ts` "CFG-003"; `tests/payment-routes.test.ts` "Free Mode (BILLING_MODE unset, valid credentials present)" — `create-order` returns 403 with zero Razorpay or database calls. Evidence (2026-10-13, branch `feat/free-mode-billing-gate`): passed locally. TEST-007 pending.
 - **Risks:** —
 
 #### CFG-004 — Mode reaches the client from the server
 - **Requirement:** Client components learn the effective mode only from server-rendered props or an authenticated API response; the client never decides entitlement from it.
 - **Why:** Requirement 6/7: the server is authoritative; the client only hides or shows UI.
 - **Files:** `components/chat/ChatRoom.tsx`, landing components.
-- **Status:** Missing.
+- **Status:** Partial. `app/(main)/chat/[roomId]/page.tsx` passes the server-decided `billingEnabled` to `ChatRoom`; landing components are not yet mode-aware; no manual devtools check recorded.
 - **Depends on:** CFG-001.
 - **Acceptance:** Billing UI visibility is driven by a server-provided value; forcing it on in the browser yields only 403/503 from billing endpoints in Free Mode.
 - **Evidence:** TEST-007 + manual devtools check recorded.
@@ -250,18 +250,18 @@ Classification of what exists today. "Implemented — unverified" means the code
 #### FREE-001 — Runs with no payment configuration
 - **Requirement:** Build, start, sign-in, onboarding, discovery, chat, and safety features work with every `RAZORPAY_*` variable absent.
 - **Why:** Requirement 8.
-- **Files:** `lib/razorpay.ts` is lazily constructed, so pages do not crash today; payment routes would return 500.
+- **Files:** `lib/billing.ts`, payment routes (now 403 instead of 500 without credentials), `components/chat/ChatRoom.tsx`.
 - **Status:** Partial.
 - **Depends on:** CFG-001, FREE-003, FREE-004.
 - **Acceptance:** TEST-007 passes; `next build` succeeds without Razorpay variables.
-- **Evidence:** CI log.
+- **Evidence:** Evidence (2026-10-13, branch `feat/free-mode-billing-gate`): `next build` passed locally with all `RAZORPAY_*` and `BILLING_MODE` blanked. App not run; TEST-007 and CI pending.
 - **Risks:** —
 
 #### FREE-002 — No payment-gateway contact in Free Mode
 - **Requirement:** In Free Mode the Checkout.js script is never loaded, the Razorpay SDK is never constructed, and no request goes to Razorpay.
 - **Why:** Requirement 8; avoids leaking usage to a provider the product is not using.
 - **Files:** `hooks/useRazorpay.ts` (loads `checkout.js` on click), `lib/razorpay.ts`.
-- **Status:** Partial — lazy, but reachable via visible ₹29 buttons.
+- **Status:** Implemented — unverified. Checkout.js is loaded only by `useRazorpay().pay()`, which Free Mode UI no longer exposes; `razorpay()` throws unless effective mode is `paid` (tested). No network capture recorded.
 - **Depends on:** FREE-003, FREE-004.
 - **Acceptance:** Network capture of a full Free Mode session shows zero `razorpay.com` requests, including after clicking every visible button.
 - **Evidence:** TEST-007 network assertion.
@@ -271,7 +271,7 @@ Classification of what exists today. "Implemented — unverified" means the code
 - **Requirement:** Free Mode shows no prices, checkout buttons, "Secured by Razorpay" text, or marketing copy about paid unlocks. Each removed affordance is replaced by the Free Mode behaviour decided in DEC-001/DEC-002, never by a broken button.
 - **Why:** A coherent free experience; avoids advertising something that cannot be bought.
 - **Files:** `components/chat/ChatRoom.tsx:184-188` (Reveal ₹29), `components/chat/TimerExpiredOverlay.tsx:36-38` (Extend ₹29), `components/modals/RevealModal.tsx`, `ExtendModal.tsx`, `BottomSheet.tsx` (`RazorpayButton`), `components/landing/FeaturesReveal.tsx:23-24`, `StatsCounter.tsx:10`, `HeroSection.tsx:66`, `Testimonials.tsx:10`, `ClosingCta.tsx:21`.
-- **Status:** Missing.
+- **Status:** Partial. Chat payment UI hidden in Free Mode (reveal button, reveal/extend sheets; the paid expiry button is replaced by "Back to dancers"). Landing copy (`FeaturesReveal`, `StatsCounter`, `HeroSection`, `Testimonials`, `ClosingCta`) still advertises ₹29 — copy decision pending (PRIV-006, DEC-008).
 - **Depends on:** CFG-004, DEC-001, DEC-002.
 - **Acceptance:** Search of rendered HTML for every Free Mode page finds no `₹`, `Razorpay`, `Pay`, `Unlock` strings; expiry and identity flows reach a defined end state.
 - **Evidence:** TEST-007 content assertions.
@@ -287,11 +287,11 @@ Classification of what exists today. "Implemented — unverified" means the code
 
   Any other event is recorded and logged, and grants nothing. **Until PAY-003 exists, the webhook in Free Mode grants nothing at all.** It verifies the signature, logs the event for manual review or refund, and returns 200. Razorpay order notes alone are never sufficient to fulfil in Free Mode.
 - **Why:** Requirements 6, 8 and 9. Customers who already paid must still be honoured after a rollback, but the webhook must not become a way to obtain entitlements while billing is disabled.
-- **Files:** `app/api/payment/create-order/route.ts`, `verify/route.ts`, `app/api/webhooks/razorpay/route.ts` (currently fulfils from order notes in all circumstances).
-- **Status:** Missing.
+- **Files:** `app/api/payment/create-order/route.ts`, `verify/route.ts`, `app/api/webhooks/razorpay/route.ts` (Free Mode gate added 2026-10-13; in effective Paid Mode the pre-existing notes-based fulfilment is unchanged).
+- **Status:** Partial. Done: `create-order`/`verify` return 403 `billing_disabled` (503 `billing_unavailable` if Paid Mode is requested but not ready) before any body parsing, database or Razorpay access; in any non-paid state the webhook still rejects bad signatures, and for valid ones grants nothing, logs event/payment/order ids (no personal data) and returns 200. Not done, by design: the rollback-continuity path (needs PAY-003/006/011), and *recording* ignored events (only logged until a ledger exists).
 - **Depends on:** CFG-001; PAY-003, PAY-006, PAY-011 for the rollback-continuity path.
 - **Acceptance:** Tests: Free Mode `create-order`/`verify` → 403 with no SDK call; Free Mode webhook with no ledger row → no grant, event logged, 200; ledger row created in Free Mode or already fulfilled → no grant; paid-era ledger row with a verified captured payment → fulfilled exactly once; paid-era row whose payment fetch fails verification → no grant, alert (OPS-003).
-- **Evidence:** TEST-004.
+- **Evidence:** TEST-004 (Free Mode subset) — `tests/payment-routes.test.ts`. Evidence (2026-10-13, branch `feat/free-mode-billing-gate`): passed locally. Mutation check: removing either gate made 5 tests fail.
 - **Risks:** Shipping the rollback-continuity path before the ledger exists would let signed-but-unexpected events grant entitlements. Building the Free Mode gate (no grants) does not depend on the ledger and should come first.
 
 #### FREE-005 — Coherent chat expiry in Free Mode
@@ -458,7 +458,7 @@ Everything in this section is **inactive until Paid Mode is effective** (CFG-002
 #### PAY-001 — Paid features gated by effective mode
 - **Requirement:** Every billing endpoint and paid UI checks the effective mode (CFG-001/002) server-side.
 - **Files:** `app/api/payment/*`.
-- **Status:** Missing.
+- **Status:** Partial. All three billing endpoints and the chat payment UI check the effective mode server-side (tested); landing marketing copy is not mode-aware (FREE-003).
 - **Depends on:** CFG-001, CFG-002.
 - **Acceptance:** See FREE-004.
 - **Evidence:** TEST-004.
@@ -871,14 +871,14 @@ Razorpay onboarding and product eligibility are **unresolved**. The ability to c
 
 ## 14. Testing strategy and measurable quality gates
 
-At baseline there is **no test framework, no test file and no CI**. Choosing a framework is part of TEST-001; it should be the smallest viable addition (for example Vitest for unit/route tests, the Supabase CLI local stack for RLS, and a single E2E tool only if justified).
+At baseline there was **no test framework, no test file and no CI**. Vitest was added on 2026-10-13 (`vitest.config.ts`, tests in `tests/`, `npm test`). There is still no CI. Choosing a framework is part of TEST-001; it should be the smallest viable addition (for example Vitest for unit/route tests, the Supabase CLI local stack for RLS, and a single E2E tool only if justified).
 
 | ID | Scope | Status | Gate |
 |---|---|---|---|
-| **TEST-001** | Test runner + `npm test` script | Missing | Exists and runs in CI |
-| **TEST-002** | Billing-mode resolution and readiness (CFG-001/002/003) | Missing | 100% of the specified input table |
+| **TEST-001** | Test runner + `npm test` script | Partial — Vitest + `npm test` exist and pass locally; no CI yet | Exists and runs in CI |
+| **TEST-002** | Billing-mode resolution and readiness (CFG-001/002/003) | Implemented — `tests/billing.test.ts`, passing locally; not in CI | 100% of the specified input table |
 | **TEST-003** | Authorization/IDOR/route table: every API route × {unauthenticated, participant, non-participant, blocked}; consent; timer; rate limits | Missing | Every route listed; all cases pass |
-| **TEST-004** | Payments: forged/missing signature, foreign order, replay, amount/currency mismatch, payment status not captured, duplicate verify+webhook, duplicate/out-of-order webhooks, fulfilment failure, refund, Free Mode rejection; **unverified payments grant nothing** | Missing | All pass; required before any Paid Mode work merges |
+| **TEST-004** | Payments: forged/missing signature, foreign order, replay, amount/currency mismatch, payment status not captured, duplicate verify+webhook, duplicate/out-of-order webhooks, fulfilment failure, refund, Free Mode rejection; **unverified payments grant nothing** | Partial — Free Mode / not-ready rejection only (`tests/payment-routes.test.ts`) | All pass; required before any Paid Mode work merges |
 | **TEST-005** | RLS + Realtime channel policies against local Supabase | Missing | All pass |
 | **TEST-006** | CI on every PR: `typecheck`, `lint`, tests, `next build` with no Razorpay env, client-bundle secret scan | Missing | Required check on `main` |
 | **TEST-007** | Free Mode smoke: no `RAZORPAY_*`, no `BILLING_MODE`; sign-up → onboarding → discovery → chat → expiry; asserts no payment UI/requests | Missing | Passes on every PR touching app code |
@@ -937,10 +937,20 @@ A phase is complete only when its exit criteria have **evidence**; planning or d
 | **R-6** | Public Realtime presence channels leak online Clerk ids and allow presence spoofing. | Medium | PRIV-005 |
 | **R-7** | The 2-minute limit can be sidestepped by never being co-present; unlimited one-sided messages. | Medium | CHAT-003, CHAT-004 |
 | **R-8** | Fabricated stats/testimonials and inaccurate privacy copy. | Medium | PRIV-006 |
-| **R-9** | Payment routes always active; missing keys → 500s; credentials effectively enable payments. | Medium | CFG-001…003 |
+| **R-9** | Payment routes always active; missing keys → 500s; credentials effectively enable payments. *Mitigated 2026-10-13 for routes and chat UI; landing copy and preview-environment live-key detection remain.* | Low | CFG-001…004, FREE-003 |
 | **R-10** | No tests or CI; every status above is unverified. | Medium | TEST-* |
 | **R-11** | Possible schema drift between migration file and live database. | Medium | DATA-001 |
 | **R-12** | Merchant eligibility unknown; seasonal timing pressure could encourage launching payments before gates pass. | High | §8 |
+
+### Tracked follow-ups from the billing-gate phase (2026-10-13)
+
+Known limitations of the Free Mode gate, tracked here so they are not mistaken for resolved. Each blocks Paid Mode (§20) until closed.
+
+| ID | Issue | Priority | Resolution required | Objectives |
+|---|---|---|---|---|
+| **FU-001** | **Webhook event loss.** In any non-paid state a correctly signed webhook is acknowledged with 200 and only logged, not persisted, so Razorpay will not retry it. A genuine payment from an earlier Paid Mode period that needs fulfilment after a rollback could be missed; until a ledger exists the only trace is the server log line (subject to the host's log retention). | Highest | Durable payment ledger (PAY-003), persisted webhook events, and reconciliation against Razorpay (PAY-013) that can recover missed events, all before any paid transaction is accepted. The Paid Mode rollback rehearsal (OPS-005) must show no lost payment. | FREE-004, PAY-003, PAY-013, OPS-005 |
+| **FU-002** | **Environment detection.** The live-key rule uses `NODE_ENV === 'production'`, which is also true for preview deployments, so a preview could accept `rzp_live_` keys. | High | An explicit, trusted deployment-environment signal (e.g. a platform-set variable, once hosting is confirmed) that allows live keys only on the production deployment, with tests. | CFG-002, DEP-001 |
+| **FU-003** | **Identity disclosure.** The paid reveal path still exists (reachable only in a fully configured Paid Mode), and identities from existing `reveals` rows are still displayed, including in Free Mode. Both conflict with DEC-002. | High | Remove the paid reveal path. Separately, first establish whether any live Razorpay payments were ever taken, then decide DEC-003 and handle historical records (stop display; refunds if needed). Do not delete records before that decision. | PRIV-001, ID-002, DEC-003 |
 
 ### Decisions required
 
@@ -979,22 +989,22 @@ A phase is complete only when its exit criteria have **evidence**; planning or d
 
 ### 18.1 Traceability matrix
 
-Status abbreviations: **V** Verified · **IU** Implemented — unverified · **P** Partial · **C** Conflicts · **M** Missing · **Pl** Planned · **IR** Information Required.
+Status abbreviations: **V** Verified (scope in brackets, e.g. unit/route level) · **IU** Implemented — unverified · **P** Partial · **C** Conflicts · **M** Missing · **Pl** Planned · **IR** Information Required.
 
 | ID | Requirement (short) | Implementation location | Status | Evidence / test | Next action | Depends / blockers |
 |---|---|---|---|---|---|---|
 | CORE-001 | Free Mode default, fully functional | app-wide | M | TEST-007 | Implement Phase 1 | CFG-001, DEC-001/002 |
 | CORE-002 | Server authoritative | `lib/server.ts`, `app/api/**` | P | TEST-003 | Fix CHAT-003 | PRIV-005 |
 | CORE-003 | Two-minute rule | `lib/room.ts`, `timer/route.ts` | P | TEST-003 | See CHAT-003/004 | DEC-001 |
-| CFG-001 | `BILLING_MODE` resolution | — (proposed `lib/billing.ts`) | M | TEST-002 | Implement + tests | — |
-| CFG-002 | Paid fails closed | `lib/razorpay.ts` | M | TEST-002 | Readiness check | CFG-001 |
-| CFG-003 | Credentials ≠ paid | `app/api/payment/*` | C | TEST-002 | Gate routes | CFG-001 |
-| CFG-004 | Mode from server | `ChatRoom.tsx`, landing | M | TEST-007 | Pass mode as prop | CFG-001 |
+| CFG-001 | `BILLING_MODE` resolution | `lib/billing.ts` | V (unit) | `tests/billing.test.ts` | Run in CI | TEST-006 |
+| CFG-002 | Paid fails closed | `lib/billing.ts`, `lib/razorpay.ts` | P | `tests/billing.test.ts`, `tests/payment-routes.test.ts` | Stricter live-key environment check | DEP-001 |
+| CFG-003 | Credentials ≠ paid | `lib/billing.ts`, payment routes | V (route) | `tests/payment-routes.test.ts` | TEST-007 smoke | TEST-007 |
+| CFG-004 | Mode from server | chat page → `ChatRoom.tsx` | P | — | Landing; devtools check | FREE-003 |
 | CFG-005 | Supabase config validation | `lib/supabase*.ts` | M | unit test | Add validator | — |
-| FREE-001 | Runs without Razorpay env | app-wide | P | TEST-007, CI build | Gate + hide | CFG-001 |
-| FREE-002 | No gateway contact | `useRazorpay.ts` | P | TEST-007 | Hide CTAs | FREE-003 |
-| FREE-003 | No paid UI/claims | chat, modals, landing | M | TEST-007 | Replace per decisions | DEC-001/002 |
-| FREE-004 | Billing endpoints inert; webhook grants only verified paid-era ledger orders | `app/api/payment/*`, webhook | M | TEST-004 | Gate first (no grants in Free Mode); continuity path after ledger | CFG-001; PAY-003/006/011 for continuity |
+| FREE-001 | Runs without Razorpay env | app-wide | P | local `next build` without Razorpay env | TEST-007, CI | TEST-006/007 |
+| FREE-002 | No gateway contact | `useRazorpay.ts`, `lib/razorpay.ts` | IU | `razorpay()` refusal test | Network capture | TEST-007 |
+| FREE-003 | No paid UI/claims | chat (done), landing (not) | P | — | Landing copy | DEC-008, PRIV-006 |
+| FREE-004 | Billing endpoints inert; webhook grants only verified paid-era ledger orders | `app/api/payment/*`, webhook | P | `tests/payment-routes.test.ts` | Continuity path after ledger | PAY-003/006/011 |
 | FREE-005 | Free mutual +2 min extension at expiry | `TimerExpiredOverlay.tsx` | M | TEST-003, TEST-007 | Build mutual-agreement flow | DATA-001; cap open |
 | FREE-006 | Free identity sharing via consent | — | M | TEST-003 | Build with ID-004 | ID-001…004 |
 | FREE-007 | Non-destructive switching | `extraSecondsFor` | IU | integration test | Write test | DEC-003 |
@@ -1011,13 +1021,13 @@ Status abbreviations: **V** Verified · **IU** Implemented — unverified · **P
 | CHAT-005 | Reconnect resync | `useSupabaseRealtime.ts` | P | E2E/manual | Refetch on resubscribe | — |
 | CHAT-006 | Read receipts consistent | `read/route.ts` | P | review | Atomic append | — |
 | CHAT-007 | Rate limiting | — | M | TEST-003 | Choose mechanism | — |
-| PAY-001 | Mode-gated billing | `app/api/payment/*` | M | TEST-004 | With FREE-004 | CFG-001/002 |
+| PAY-001 | Mode-gated billing | payment routes, `ChatRoom.tsx` | P | `tests/payment-routes.test.ts` | Landing copy | FREE-003 |
 | PAY-002 | Server catalogue, amount+currency | `lib/room.ts:24`, `payments.ts:34` | P | TEST-004 | Add currency check, catalogue | PAY-003 |
 | PAY-003 | Order/payment ledger | — | M | TEST-004 | New migration | DATA-001 |
 | PAY-004 | Order ownership | `verify/route.ts:19-21` | IU | TEST-004 | Move to ledger | PAY-003 |
 | PAY-005 | Checkout signature | `lib/razorpay.ts:23-29` | IU | TEST-004 | Write tests | CFG-002 |
 | PAY-006 | Authoritative payment status | — | M | TEST-004 | Fetch payment | PAY-003 |
-| PAY-007 | Raw-body webhook | `webhooks/razorpay/route.ts` | P | TEST-004 | Guard parse | — |
+| PAY-007 | Raw-body webhook | `webhooks/razorpay/route.ts` | P | TEST-004 (bad signature rejected) | Guard parse on the paid path | — |
 | PAY-008 | Idempotency/concurrency | `payments.ts:39-47` | P (defect) | TEST-004 | Ledger + state machine | PAY-003 |
 | PAY-009 | Event coverage/ordering | webhook | M | TEST-004 | Handle events | PAY-003 |
 | PAY-010 | Recoverable fulfilment | `payments.ts` | M | TEST-004 | Transactional fn | PAY-003 |
@@ -1033,7 +1043,7 @@ Status abbreviations: **V** Verified · **IU** Implemented — unverified · **P
 | GATE-006 | Payment testing | — | M | CI + test record | — | TEST-004 |
 | GATE-007 | Monitoring/incident | — | M | runbook | — | OPS-* |
 | GATE-008 | Legal/privacy review | — | M | sign-off | Engage reviewer | DEC-002/005/006 |
-| SEC-001 | Secrets server-side | `lib/*` `server-only` | IU | bundle scan | Add CI scan | TEST-006 |
+| SEC-001 | Secrets server-side | `lib/*` `server-only` | IU | manual scan 2026-10-13: no secret names in `.next/static` except the Clerk SDK's own env lookup (no values) | Add CI scan | TEST-006 |
 | SEC-002 | AuthZ before service role | all `supabaseAdmin()` callers | IU | TEST-003 | Write tests | — |
 | SEC-003 | RLS correct | migration | IU | TEST-005 | Local Supabase tests | IR: live config |
 | SEC-004 | Input validation | route handlers | P | TEST-003 | Validate inputs | — |
@@ -1058,7 +1068,10 @@ Status abbreviations: **V** Verified · **IU** Implemented — unverified · **P
 | API-001 | Consistent contracts | `lib/server.ts` | P | TEST-003 | Error codes | — |
 | API-002 | Route inventory | §3.3 | IU | TEST-003 | Route-table test | TEST-001 |
 | OPS-001…006 | Ops | see §13 | M/P | see §13 | see §13 | — |
-| TEST-001…007 | Testing | — | M | CI | Phase 0/1 | — |
+| TEST-001 | Test runner | `vitest.config.ts`, `tests/` | P | `npm test` local | Add CI | TEST-006 |
+| TEST-002 | Billing config tests | `tests/billing.test.ts` | IU (passing locally) | local run | Run in CI | TEST-006 |
+| TEST-004 | Payment tests | `tests/payment-routes.test.ts` | P (Free Mode subset) | local run | Full matrix in Phase 2 | PAY-003 |
+| TEST-003, TEST-005…007 | Testing | — | M | — | Phase 0/1 | — |
 | DEP-001…004 | Deployment | — | IR/M | see §15 | see §15 | — |
 
 ### 18.2 Change-management rules
@@ -1114,6 +1127,7 @@ A task is done only when **all** of the following hold:
 ### Paid Mode enablement (additionally)
 
 - [ ] GATE-001…008 all recorded as passed, with evidence filed
+- [ ] FU-001, FU-002, FU-003 closed with evidence
 - [ ] PAY-001…016 at *Verified*; TEST-004 green
 - [ ] OPS-002, OPS-003, OPS-005 in place; Free Mode rollback rehearsed
 - [ ] DEC-002, DEC-004, DEC-007, DEC-010 decided and reflected in objectives

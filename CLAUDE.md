@@ -2,7 +2,7 @@
 
 Next.js 14 App Router + TypeScript, Clerk auth, Supabase (Postgres, RLS, Realtime), optional Razorpay. See `README.md` for setup and `OBJECTIVES.md` for the product and engineering contract.
 
-Commands: `npm run dev`, `npm run typecheck`, `npm run lint`, `npm run build`. There is no test runner yet (objective TEST-001).
+Commands: `npm run dev`, `npm run typecheck`, `npm run lint`, `npm test` (Vitest; tests live in `tests/`), `npm run build`. There is no CI yet (TEST-006), so run these locally.
 
 ## Project governance (mandatory for every coding task)
 

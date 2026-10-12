@@ -20,7 +20,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { cn } from '@/lib/utils';
 import type { Message, RoomState } from '@/lib/types';
 
-export function ChatRoom({ initial }: { initial: RoomState }) {
+export function ChatRoom({ initial, billingEnabled }: { initial: RoomState; billingEnabled: boolean }) {
   const { roomId, me, partner } = initial;
   const [messages, setMessages] = useState<Message[]>(initial.messages);
   const [timerStartedAt, setTimerStartedAt] = useState(initial.timerStartedAt);
@@ -141,6 +141,7 @@ export function ChatRoom({ initial }: { initial: RoomState }) {
   };
 
   const startPayment = async (type: 'reveal' | 'extend') => {
+    if (!billingEnabled) return;
     const result = await pay(type, { targetUserId: partner.clerk_id, roomId });
     if (!result) return;
     setSheet(null);
@@ -181,7 +182,7 @@ export function ChatRoom({ initial }: { initial: RoomState }) {
               <span className="text-xs text-paper/45">{partnerHere ? 'in the room' : 'away'}</span>
             </div>
           </div>
-          {!revealed && (
+          {billingEnabled && !revealed && (
             <button onClick={() => openSheet('reveal')} className="shrink-0 rounded-md bg-haldi px-3 py-2 text-xs font-extrabold text-ink transition-colors hover:bg-haldi-dark hover:text-paper sm:text-sm">
               Reveal Identity ₹29 →
             </button>
@@ -206,7 +207,7 @@ export function ChatRoom({ initial }: { initial: RoomState }) {
             <div ref={bottom} />
           </div>
         </div>
-        <TimerExpiredOverlay show={timer.expired && sheet === null} onExtend={() => openSheet('extend')} />
+        <TimerExpiredOverlay show={timer.expired && sheet === null} onExtend={billingEnabled ? () => openSheet('extend') : undefined} />
       </div>
 
       <form onSubmit={send} className={cn('border-t border-paper/10 bg-ink-2 px-3 py-3 transition-[filter,opacity]', timer.expired && 'opacity-50 blur-[1px]')}>
@@ -232,8 +233,12 @@ export function ChatRoom({ initial }: { initial: RoomState }) {
         </div>
       </form>
 
-      <RevealModal open={sheet === 'reveal'} onClose={() => setSheet(null)} onPay={() => startPayment('reveal')} busy={busy} error={payError} partnerName={partner.display_name} />
-      <ExtendModal open={sheet === 'extend'} onClose={() => setSheet(null)} onPay={() => startPayment('extend')} busy={busy} error={payError} />
+      {billingEnabled && (
+        <>
+          <RevealModal open={sheet === 'reveal'} onClose={() => setSheet(null)} onPay={() => startPayment('reveal')} busy={busy} error={payError} partnerName={partner.display_name} />
+          <ExtendModal open={sheet === 'extend'} onClose={() => setSheet(null)} onPay={() => startPayment('extend')} busy={busy} error={payError} />
+        </>
+      )}
       <Toast message={toast} onDone={() => setToast(null)} />
     </main>
   );

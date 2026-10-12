@@ -1,10 +1,13 @@
 import 'server-only';
 import crypto from 'crypto';
 import Razorpay from 'razorpay';
+import { getBillingStatus } from './billing';
 
 let client: Razorpay | null = null;
 
 export function razorpay() {
+  // Routes check first; this stops any future caller reaching Razorpay in Free Mode (FREE-002).
+  if (getBillingStatus().mode !== 'paid') throw new Error('Billing is not enabled');
   if (!client) {
     client = new Razorpay({
       key_id: process.env.RAZORPAY_KEY_ID!,

@@ -41,7 +41,9 @@ npm run dev
 2. Under **Authentication → Sign In / Providers → Third-party auth**, add **Clerk** and paste your Clerk domain. Browser requests then carry the Clerk session token, and RLS reads the Clerk user id from `auth.jwt()->>'sub'`.
 3. Run `supabase/migrations/0001_init.sql` in the SQL editor. It creates the tables, RLS policies and the Realtime publication.
 
-### 3. Razorpay
+### 3. Razorpay (optional)
+
+The app runs in Free Mode by default and needs no Razorpay setup. Payments are on only when `BILLING_MODE=paid` **and** every Razorpay variable passes the server's readiness check; otherwise payment UI is hidden and the payment routes return `403`/`503`. See `OBJECTIVES.md` §6–§8 before enabling it.
 
 1. Copy the key id and secret from Razorpay Dashboard → Settings → API Keys (use test mode first).
 2. Add a webhook at `https://<your-domain>/api/webhooks/razorpay` for the `payment.captured` event, and put its secret in `RAZORPAY_WEBHOOK_SECRET`.
