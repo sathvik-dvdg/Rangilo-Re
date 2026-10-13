@@ -14,7 +14,7 @@ import { useLobbyPresence } from '@/hooks/useLobbyPresence';
 import { useAppStore } from '@/store/useAppStore';
 import { roomIdFor } from '@/lib/room';
 import { cn, timeAgo } from '@/lib/utils';
-import type { PublicProfile } from '@/lib/types';
+import type { MyProfile, PublicProfile } from '@/lib/types';
 
 type Filter = 'all' | 'female' | 'male' | 'online';
 const FILTERS: { id: Filter; label: string }[] = [
@@ -55,7 +55,7 @@ function Row({ index, style, data }: ListChildComponentProps<RowData>) {
   );
 }
 
-export function Dashboard({ me, suggestedName }: { me: PublicProfile | null; suggestedName: string | null }) {
+export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggestedName: string | null }) {
   const { userId } = useAuth();
   const router = useRouter();
   const onlineIds = useAppStore((s) => s.onlineIds);
@@ -64,6 +64,7 @@ export function Dashboard({ me, suggestedName }: { me: PublicProfile | null; sug
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [attempt, setAttempt] = useState(0);
+  const [editOpen, setEditOpen] = useState(false);
 
   useLobbyPresence(me ? userId ?? null : null);
 
@@ -126,11 +127,25 @@ export function Dashboard({ me, suggestedName }: { me: PublicProfile | null; sug
                 <div className="flex items-center gap-2">
                   <p className="truncate font-display text-lg text-haldi">{me.display_name}</p>
                   <GenderBadge gender={me.gender} />
+                  <button
+                    type="button"
+                    onClick={() => setEditOpen(true)}
+                    className="ml-auto rounded border border-paper/15 px-2.5 py-1 text-xs font-semibold text-paper/70 hover:border-haldi hover:text-haldi transition-colors"
+                  >
+                    Edit Profile
+                  </button>
                 </div>
-                <p className="mt-0.5 text-sm text-paper/60">
-                  <span className="mr-1.5 inline-block h-2 w-2 rounded-full bg-[#7FB069] align-middle" />
-                  Online: <span className="tabular font-bold text-paper">{onlineCount}</span> dancers tonight
-                </p>
+                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-paper/60">
+                  <p>
+                    <span className="mr-1.5 inline-block h-2 w-2 rounded-full bg-[#7FB069] align-middle" />
+                    Online: <span className="tabular font-bold text-paper">{onlineCount}</span> dancers tonight
+                  </p>
+                  {me.email && (
+                    <span className="text-paper/40">
+                      Gmail: <span className="text-paper/75">{me.email}</span> (hidden until ₹29 unlock)
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -196,7 +211,18 @@ export function Dashboard({ me, suggestedName }: { me: PublicProfile | null; sug
         </>
       )}
 
-      <OnboardingModal open={!me} suggestedName={suggestedName ?? ''} onDone={() => router.refresh()} />
+      <OnboardingModal
+        open={!me || editOpen}
+        suggestedName={me?.display_name ?? suggestedName ?? ''}
+        initialGender={me?.gender}
+        initialRealName={me?.real_name ?? ''}
+        initialEmail={me?.email ?? ''}
+        onDone={() => {
+          setEditOpen(false);
+          router.refresh();
+        }}
+        onClose={() => setEditOpen(false)}
+      />
     </main>
   );
 }
