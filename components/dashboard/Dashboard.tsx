@@ -50,7 +50,20 @@ function Row({ index, style, data }: ListChildComponentProps<RowData>) {
         onClick={() => data.open(u)}
         className="flex h-[88px] w-full items-center gap-3.5 rounded-lg px-3 text-left transition-colors hover:bg-paper/[0.04]"
       >
-        <Avatar name={u.display_name} gender={u.gender} online={online} />
+        <div className="relative shrink-0">
+          <Avatar name={u.display_name} gender={u.gender} online={online} />
+          {!unlocked && (
+            <span
+              title="Identity Locked (Real identity hidden)"
+              className={cn(
+                'absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full border bg-kumkum text-paper shadow-sm',
+                online ? 'border-[#7FB069] ring-1 ring-[#7FB069]/60' : 'border-ink',
+              )}
+            >
+              <Lock className="h-2.5 w-2.5" />
+            </span>
+          )}
+        </div>
 
         <div className="min-w-0 flex-1 border-b border-paper/[0.07] pb-2 pt-2">
           {/* Top line: Name, Unlocked badge (if revealed), Gender, Branch, Vibe */}
@@ -191,23 +204,11 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
           <div className="stitch-b bg-ink-2">
             <div className="mx-auto max-w-3xl px-4 py-4 sm:px-6">
               <div className="flex items-center gap-4">
-                <div className="relative shrink-0">
-                  <Avatar name={me.display_name} gender={me.gender} size={48} />
-                  <span
-                    title="Profile Locked"
-                    className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-ink-2 bg-kumkum text-paper shadow"
-                  >
-                    <Lock className="h-2.5 w-2.5" />
-                  </span>
-                </div>
+                <Avatar name={me.display_name} gender={me.gender} size={48} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="truncate font-display text-lg text-haldi">{me.display_name}</p>
                     <GenderBadge gender={me.gender} />
-                    <span className="inline-flex items-center gap-1 rounded-full border border-kumkum/40 bg-kumkum/15 px-2.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-[#FF9E94] shadow-sm">
-                      <Lock className="h-2.5 w-2.5 text-kumkum animate-pulse" />
-                      Locked Profile
-                    </span>
                     {(me.branch || me.college_year) && (
                       <span className="rounded bg-paper/10 px-2 py-0.5 text-[11px] font-bold text-paper/80">
                         {me.branch || 'CSE'} · {me.college_year ? me.college_year.replace(' Year', ' Yr') : '1st Yr'}
@@ -238,28 +239,6 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
                     )}
                   </div>
                 </div>
-              </div>
-
-              {/* Eye-catching Profile Locked reminder banner */}
-              <div className="mt-3 flex flex-wrap sm:flex-nowrap items-center justify-between gap-2.5 rounded-xl border border-kumkum/30 bg-gradient-to-r from-kumkum/20 via-ink to-ink-3 px-3.5 py-2.5 text-xs shadow-sm">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-kumkum/25 text-[#FF9E94]">
-                    <Lock className="h-3.5 w-3.5" />
-                  </span>
-                  <div className="min-w-0 text-paper/80 text-[11.5px] leading-snug">
-                    <span className="font-extrabold text-paper">🔒 Profile Locked & Protected:</span>{' '}
-                    <span>
-                      Your Real Name, Gmail & Instagram are hidden from other dancers. Paying never unlocks them.
-                    </span>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setEditOpen(true)}
-                  className="shrink-0 font-bold text-haldi hover:underline text-[11px] whitespace-nowrap ml-auto sm:ml-0"
-                >
-                  Edit Details →
-                </button>
               </div>
             </div>
           </div>

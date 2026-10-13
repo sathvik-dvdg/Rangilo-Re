@@ -1,6 +1,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
+import { Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 function fmt(ms: number) {
@@ -9,7 +10,35 @@ function fmt(ms: number) {
 }
 
 /** Thin bar under the header. Haldi while there's time, then orange, then kumkum. */
-export function ChatTimer({ started, remaining, fraction, waitingFor }: { started: boolean; remaining: number | null; fraction: number; waitingFor: string | null }) {
+export function ChatTimer({
+  started,
+  remaining,
+  fraction,
+  waitingFor,
+  isUnlocked,
+}: {
+  started: boolean;
+  remaining: number | null;
+  fraction: number;
+  waitingFor: string | null;
+  isUnlocked?: boolean;
+}) {
+  if (isUnlocked) {
+    return (
+      <div className="sticky top-0 z-20 bg-ink-2 px-4 pb-2.5 pt-2">
+        <div className="flex items-center justify-between text-xs">
+          <span className="flex items-center gap-1.5 font-bold text-[#9CC587]">
+            <Sparkles className="h-3.5 w-3.5 text-haldi animate-pulse" />
+            Unlimited Chat Unlocked
+          </span>
+          <span className="rounded bg-haldi/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-haldi">
+            No Time Limit ♾️
+          </span>
+        </div>
+      </div>
+    );
+  }
+
   const urgent = remaining !== null && remaining < 30_000;
   const color = !started ? 'bg-paper/20' : fraction > 0.5 ? 'bg-haldi' : fraction > 0.25 ? 'bg-[#D9732F]' : 'bg-kumkum';
 
