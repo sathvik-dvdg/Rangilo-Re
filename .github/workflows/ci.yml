@@ -1,0 +1,54 @@
+# TEST-006. Runs without any Clerk, Supabase or Razorpay credentials and with
+# BILLING_MODE unset, so every check exercises Free Mode. Tests mock external
+# providers; nothing here talks to a real provider or deploys anything.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Tests (unit, route, Free Mode smoke; providers mocked)
+        run: npm test
+
+      - name: Production build without provider credentials
+        run: npm run build
+
+      # Server-only variable names must never appear in browser chunks. CLERK_SECRET_KEY is
+      # not checked: the Clerk SDK's own client code looks it up by name (it is never inlined,
+      # since only NEXT_PUBLIC_* values are).
+      - name: Client bundle does not reference server secrets
+        run: |
+          if grep -rlE 'RAZORPAY_KEY_SECRET|RAZORPAY_WEBHOOK_SECRET|SUPABASE_SERVICE_ROLE_KEY|BILLING_MODE' .next/static; then
+            echo "::error::A server-only variable is referenced in the client bundle"
+            exit 1
+          fi

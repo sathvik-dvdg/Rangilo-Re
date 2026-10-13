@@ -2,7 +2,7 @@
 
 Next.js 14 App Router + TypeScript, Clerk auth, Supabase (Postgres, RLS, Realtime), optional Razorpay. See `README.md` for setup and `OBJECTIVES.md` for the product and engineering contract.
 
-Commands: `npm run dev`, `npm run typecheck`, `npm run lint`, `npm test` (Vitest; tests live in `tests/`), `npm run build`. There is no CI yet (TEST-006), so run these locally.
+Commands: `npm run dev`, `npm run typecheck`, `npm run lint`, `npm test` (Vitest; tests live in `tests/`), `npm run test:smoke` (Free Mode smoke test; in-process, providers mocked), `npm run build`. `.github/workflows/ci.yml` runs typecheck, lint, tests, build and a client-bundle secret scan on pull requests, with no provider credentials; still run them locally before reporting work as done.
 
 ## Project governance (mandatory for every coding task)
 

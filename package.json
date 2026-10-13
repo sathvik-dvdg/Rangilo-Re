@@ -9,6 +9,7 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:smoke": "vitest run tests/smoke",
     "test:watch": "vitest"
   },
   "dependencies": {

@@ -11,6 +11,8 @@ export default defineConfig({
       'server-only': fileURLToPath(new URL('./node_modules/server-only/empty.js', import.meta.url)),
     },
   },
+  // tsconfig keeps JSX for Next ("preserve"); tests that render components need it compiled.
+  esbuild: { jsx: 'automatic' },
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts'],
