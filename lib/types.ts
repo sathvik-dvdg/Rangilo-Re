@@ -1,17 +1,30 @@
 export type Gender = 'male' | 'female' | 'other';
 
+export const VIBE_TAGS = [
+  'Pro Garba Dancer 💃',
+  'Here for Dandiya 🥢',
+  'Beginner (Teach Me!) 😅',
+  'Here for Food & Photos 📸',
+  'Looking for a Group 👥',
+] as const;
+
+export type VibeTag = (typeof VIBE_TAGS)[number];
+
 export type PublicProfile = {
   clerk_id: string;
   display_name: string;
   gender: Gender;
   branch?: string;
   college_year?: string;
+  vibe_tag?: string;
+  outfit_color?: string;
   last_seen: string;
 };
 
 export type MyProfile = PublicProfile & {
   real_name: string;
   email: string;
+  instagram_handle?: string;
 };
 
 export type Message = {
@@ -28,6 +41,7 @@ export type Message = {
 export type RevealedIdentity = {
   real_name: string;
   email: string;
+  instagram_handle?: string;
 };
 
 export type RoomState = {

@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { completeOnboarding, rerollDisplayName } from '@/app/(main)/dashboard/actions';
 import { useFocusTrap } from '@/hooks/useFocusTrap';
 import { cn } from '@/lib/utils';
-import type { Gender } from '@/lib/types';
+import { VIBE_TAGS, type Gender } from '@/lib/types';
 
 const GENDERS: { id: Gender; label: string }[] = [
   { id: 'female', label: 'Female' },
@@ -28,6 +28,9 @@ export function OnboardingModal({
   initialEmail = '',
   initialBranch = 'CSE',
   initialCollegeYear = '3rd Year',
+  initialVibeTag = '',
+  initialOutfitColor = '',
+  initialInstagramHandle = '',
   onDone,
   onClose,
 }: {
@@ -38,6 +41,9 @@ export function OnboardingModal({
   initialEmail?: string;
   initialBranch?: string;
   initialCollegeYear?: string;
+  initialVibeTag?: string;
+  initialOutfitColor?: string;
+  initialInstagramHandle?: string;
   onDone: () => void;
   onClose?: () => void;
 }) {
@@ -49,6 +55,9 @@ export function OnboardingModal({
   const [email, setEmail] = useState(initialEmail);
   const [branch, setBranch] = useState(initialBranch || 'CSE');
   const [collegeYear, setCollegeYear] = useState(initialCollegeYear || '3rd Year');
+  const [vibeTag, setVibeTag] = useState<string>(initialVibeTag || VIBE_TAGS[0]);
+  const [outfitColor, setOutfitColor] = useState(initialOutfitColor || '');
+  const [instagramHandle, setInstagramHandle] = useState(initialInstagramHandle || '');
   const [photo, setPhoto] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -70,9 +79,12 @@ export function OnboardingModal({
       if (initialEmail) setEmail(initialEmail);
       if (initialBranch) setBranch(initialBranch);
       if (initialCollegeYear) setCollegeYear(initialCollegeYear);
+      if (initialVibeTag) setVibeTag(initialVibeTag);
+      if (initialOutfitColor) setOutfitColor(initialOutfitColor);
+      if (initialInstagramHandle) setInstagramHandle(initialInstagramHandle);
       setError(null);
     }
-  }, [open, initialGender, suggestedName, initialRealName, initialEmail, initialBranch, initialCollegeYear]);
+  }, [open, initialGender, suggestedName, initialRealName, initialEmail, initialBranch, initialCollegeYear, initialVibeTag, initialOutfitColor, initialInstagramHandle]);
 
   useEffect(() => {
     if (user && !isEditing) {
@@ -118,6 +130,9 @@ export function OnboardingModal({
         email: email.trim(),
         branch,
         collegeYear,
+        vibeTag,
+        outfitColor,
+        instagramHandle,
       });
       if ('error' in res && res.error) {
         setError(res.error);
@@ -316,6 +331,54 @@ export function OnboardingModal({
                       </div>
                     </div>
 
+                    {/* Garba Vibe */}
+                    <div className="mt-5">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold uppercase tracking-wider text-haldi">
+                          Tonight&apos;s Garba Vibe (Public)
+                        </label>
+                        <span className="text-[11px] text-paper/50">Your dance mood</span>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {VIBE_TAGS.map((tag) => (
+                          <button
+                            key={tag}
+                            type="button"
+                            onClick={() => setVibeTag(tag)}
+                            className={cn(
+                              'rounded-lg px-2.5 py-1 text-xs font-bold transition-all',
+                              vibeTag === tag
+                                ? 'bg-haldi text-ink shadow-sm'
+                                : 'border border-paper/15 bg-ink text-paper/70 hover:border-paper/40'
+                            )}
+                          >
+                            {tag}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Outfit Hint */}
+                    <div className="mt-5">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold uppercase tracking-wider text-haldi">
+                          Tonight&apos;s Outfit Hint (Public)
+                        </label>
+                        <span className="text-[11px] text-paper/50">Help partners spot you</span>
+                      </div>
+                      <input
+                        type="text"
+                        value={outfitColor}
+                        onChange={(e) => setOutfitColor(e.target.value)}
+                        placeholder="e.g. Black mirror-work Kurta, Yellow Bandhani..."
+                        maxLength={100}
+                        className="mt-1.5 w-full rounded-lg border border-paper/15 bg-ink-2 px-3 py-2 text-sm text-paper placeholder:text-paper/30 focus:border-haldi focus:outline-none transition-colors"
+                      />
+                      <p className="mt-1 text-[11px] text-paper/40">
+                        Visible on your lobby card so matched partners can find you across the college grounds.
+                      </p>
+                    </div>
+
                     {/* Private Details Box */}
                     <div className="mt-5 rounded-xl border border-haldi/25 bg-ink/60 p-4">
                       <div className="flex items-center gap-2">
@@ -327,7 +390,7 @@ export function OnboardingModal({
                         </p>
                       </div>
                       <p className="mt-1.5 text-xs text-paper/60 leading-relaxed">
-                        These remain hidden. When another dancer pays ₹29 to unlock your identity, your real name and Gmail will be revealed to them.
+                        These remain hidden. When another dancer pays ₹29 to unlock your identity, your real name, Gmail, and Instagram will be revealed to them.
                       </p>
 
                       <div className="mt-3.5 space-y-3">
@@ -356,6 +419,28 @@ export function OnboardingModal({
                             maxLength={80}
                             className="mt-1 w-full rounded-lg border border-paper/15 bg-ink-2 px-3 py-2 text-sm text-paper placeholder:text-paper/30 focus:border-haldi focus:outline-none transition-colors"
                           />
+                        </div>
+                        <div>
+                          <div className="flex items-center justify-between">
+                            <label className="block text-xs font-semibold text-paper/80">
+                              Instagram Handle
+                            </label>
+                            <span className="text-[11px] text-paper/40">Private · ₹29 unlock only</span>
+                          </div>
+                          <div className="mt-1 flex items-center rounded-lg border border-paper/15 bg-ink-2 px-3 focus-within:border-haldi focus-within:ring-1 focus-within:ring-haldi transition-colors">
+                            <span className="font-bold text-sm text-haldi">@</span>
+                            <input
+                              type="text"
+                              value={instagramHandle}
+                              onChange={(e) => setInstagramHandle(e.target.value.replace(/^@+/, ''))}
+                              placeholder="e.g. aarohi_garba"
+                              maxLength={30}
+                              className="w-full bg-transparent px-2 py-2 text-sm text-paper placeholder:text-paper/30 focus:outline-none"
+                            />
+                          </div>
+                          <p className="mt-1 text-[11px] text-paper/40">
+                            Never shown publicly; only shared upon a verified identity unlock.
+                          </p>
                         </div>
                       </div>
                     </div>

@@ -2,13 +2,13 @@ import 'server-only';
 import { auth } from '@clerk/nextjs/server';
 import { supabaseAdmin } from './supabaseAdmin';
 import { FREE_CHAT_MS, partnerFromRoomId } from './room';
-import type { MyProfile, PublicProfile, RoomState } from './types';
+import type { MyProfile, PublicProfile, RevealedIdentity, RoomState } from './types';
 
 export const PUBLIC_COLUMNS = 'clerk_id, display_name, gender, last_seen';
 export const OWN_COLUMNS = 'clerk_id, display_name, gender, last_seen, real_name, email';
 
-export const CAMPUS_PUBLIC_COLUMNS = 'clerk_id, display_name, gender, branch, college_year, last_seen';
-export const CAMPUS_OWN_COLUMNS = 'clerk_id, display_name, gender, branch, college_year, last_seen, real_name, email';
+export const CAMPUS_PUBLIC_COLUMNS = 'clerk_id, display_name, gender, branch, college_year, vibe_tag, outfit_color, last_seen';
+export const CAMPUS_OWN_COLUMNS = 'clerk_id, display_name, gender, branch, college_year, vibe_tag, outfit_color, last_seen, real_name, email, instagram_handle';
 
 export class HttpError extends Error {
   constructor(public status: number, message: string) {
@@ -37,10 +37,18 @@ export async function getProfile(clerkId: string): Promise<PublicProfile | null>
   if (error) {
     const fallback = await supabaseAdmin()
       .from('users')
-      .select(PUBLIC_COLUMNS)
+      .select('clerk_id, display_name, gender, branch, college_year, last_seen')
       .eq('clerk_id', clerkId)
       .maybeSingle();
-    if (fallback.error) throw fallback.error;
+    if (fallback.error) {
+      const basic = await supabaseAdmin()
+        .from('users')
+        .select(PUBLIC_COLUMNS)
+        .eq('clerk_id', clerkId)
+        .maybeSingle();
+      if (basic.error) throw basic.error;
+      return basic.data as PublicProfile | null;
+    }
     return fallback.data as PublicProfile | null;
   }
   return data as PublicProfile | null;
@@ -55,10 +63,18 @@ export async function getMyProfile(clerkId: string): Promise<MyProfile | null> {
   if (error) {
     const fallback = await supabaseAdmin()
       .from('users')
-      .select(OWN_COLUMNS)
+      .select('clerk_id, display_name, gender, branch, college_year, last_seen, real_name, email')
       .eq('clerk_id', clerkId)
       .maybeSingle();
-    if (fallback.error) throw fallback.error;
+    if (fallback.error) {
+      const basic = await supabaseAdmin()
+        .from('users')
+        .select(OWN_COLUMNS)
+        .eq('clerk_id', clerkId)
+        .maybeSingle();
+      if (basic.error) throw basic.error;
+      return basic.data as MyProfile | null;
+    }
     return fallback.data as MyProfile | null;
   }
   return data as MyProfile | null;
@@ -115,7 +131,7 @@ export function isExpired(timerStartedAt: string | null, extraSeconds: number) {
   return Date.now() - new Date(timerStartedAt).getTime() >= FREE_CHAT_MS + extraSeconds * 1000;
 }
 
-export async function getRevealed(payerId: string, targetId: string) {
+export async function getRevealed(payerId: string, targetId: string): Promise<RevealedIdentity | null> {
   const db = supabaseAdmin();
   const { data: reveal, error } = await db
     .from('reveals')
@@ -127,11 +143,19 @@ export async function getRevealed(payerId: string, targetId: string) {
   if (!reveal) return null;
   const { data: user, error: uErr } = await db
     .from('users')
-    .select('real_name, email')
+    .select('real_name, email, instagram_handle')
     .eq('clerk_id', targetId)
     .single();
-  if (uErr) throw uErr;
-  return user as { real_name: string; email: string };
+  if (uErr) {
+    const fallback = await db
+      .from('users')
+      .select('real_name, email')
+      .eq('clerk_id', targetId)
+      .single();
+    if (fallback.error) throw fallback.error;
+    return fallback.data as RevealedIdentity;
+  }
+  return user as RevealedIdentity;
 }
 
 export async function getRoomState(roomId: string, userId: string): Promise<RoomState> {

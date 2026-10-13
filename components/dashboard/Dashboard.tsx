@@ -15,7 +15,7 @@ import { useLobbyPresence } from '@/hooks/useLobbyPresence';
 import { useAppStore } from '@/store/useAppStore';
 import { roomIdFor } from '@/lib/room';
 import { cn, timeAgo } from '@/lib/utils';
-import type { MyProfile, PublicProfile } from '@/lib/types';
+import { VIBE_TAGS, type MyProfile, type PublicProfile } from '@/lib/types';
 
 type Filter = 'all' | 'female' | 'male' | 'online';
 const FILTERS: { id: Filter; label: string }[] = [
@@ -25,7 +25,10 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: 'online', label: 'Online now' },
 ];
 
-const ROW = 84;
+const BRANCH_OPTIONS = ['All Branches', 'CSE', 'ISE', 'AIML', 'ECE', 'MECH', 'CIVIL', 'AIDS'];
+const YEAR_OPTIONS = ['All Years', '1st Year', '2nd Year', '3rd Year', '4th Year'];
+
+const ROW = 96;
 
 type RowData = {
   items: PublicProfile[];
@@ -45,11 +48,11 @@ function Row({ index, style, data }: ListChildComponentProps<RowData>) {
         animate={{ opacity: 1, x: 0 }}
         transition={{ delay: Math.min(index, 15) * 0.04 }}
         onClick={() => data.open(u)}
-        className="flex h-[76px] w-full items-center gap-4 rounded-md px-3 text-left transition-colors hover:bg-paper/[0.04]"
+        className="flex h-[88px] w-full items-center gap-3.5 rounded-lg px-3 text-left transition-colors hover:bg-paper/[0.04]"
       >
         <Avatar name={u.display_name} gender={u.gender} online={online} />
-        <div className="min-w-0 flex-1 border-b border-paper/[0.07] pb-3 pt-3">
-          <div className="flex items-center gap-2">
+        <div className="min-w-0 flex-1 border-b border-paper/[0.07] pb-2 pt-2">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <p className="truncate font-display text-[15px] text-paper">
               {unlocked?.real_name ? unlocked.real_name : u.display_name}
             </p>
@@ -61,19 +64,38 @@ function Row({ index, style, data }: ListChildComponentProps<RowData>) {
             <GenderBadge gender={u.gender} />
             {(u.branch || u.college_year) && (
               <span className="rounded bg-paper/10 px-1.5 py-0.5 text-[10px] font-semibold text-paper/70">
-                {u.branch || 'CSE'} · {u.college_year ? u.college_year.replace(' Year', ' Yr') : '3rd Yr'}
+                {u.branch || 'CSE'} · {u.college_year ? u.college_year.replace(' Year', ' Yr') : '1st Yr'}
+              </span>
+            )}
+            {u.vibe_tag && (
+              <span className="rounded-full bg-haldi/10 border border-haldi/25 px-2 py-0.5 text-[10px] font-medium text-haldi truncate max-w-[170px]">
+                {u.vibe_tag}
               </span>
             )}
           </div>
-          <p className={cn('mt-1 text-xs truncate', online ? 'text-[#9CC587]' : 'text-paper/45')}>
-            {unlocked?.email ? (
-              <span className="text-paper/70">{unlocked.email} · {online ? 'Online now' : `Seen ${timeAgo(u.last_seen)}`}</span>
-            ) : online ? (
-              'On the floor now'
-            ) : (
-              `Last seen ${timeAgo(u.last_seen)}`
+          <div className="mt-1 flex items-center justify-between gap-2 text-xs">
+            <div className="min-w-0 flex-1 truncate">
+              {u.outfit_color ? (
+                <span className="truncate text-paper/75">
+                  👘 <span className="italic">{u.outfit_color}</span>
+                </span>
+              ) : (
+                <span className={cn('truncate', online ? 'text-[#9CC587]' : 'text-paper/45')}>
+                  {online ? 'On the floor now' : `Seen ${timeAgo(u.last_seen)}`}
+                </span>
+              )}
+            </div>
+            {u.outfit_color && (
+              <span className={cn('shrink-0 text-[11px]', online ? 'text-[#9CC587]' : 'text-paper/40')}>
+                {online ? 'Online' : timeAgo(u.last_seen)}
+              </span>
             )}
-          </p>
+            {unlocked?.email && (
+              <span className="shrink-0 text-[11px] text-paper/50">
+                {unlocked.email}
+              </span>
+            )}
+          </div>
         </div>
       </motion.button>
     </div>
@@ -89,6 +111,9 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
+  const [selectedBranch, setSelectedBranch] = useState<string>('all');
+  const [selectedYear, setSelectedYear] = useState<string>('all');
+  const [selectedVibe, setSelectedVibe] = useState<string>('all');
   const [attempt, setAttempt] = useState(0);
   const [editOpen, setEditOpen] = useState(false);
 
@@ -107,14 +132,25 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     return (users ?? [])
-      .filter((u) => !q || u.display_name.toLowerCase().includes(q))
+      .filter((u) => {
+        if (!q) return true;
+        const matchesName = u.display_name.toLowerCase().includes(q);
+        const matchesOutfit = u.outfit_color ? u.outfit_color.toLowerCase().includes(q) : false;
+        return matchesName || matchesOutfit;
+      })
       .filter((u) => {
         if (filter === 'online') return onlineIds.has(u.clerk_id);
         if (filter === 'all') return true;
         return u.gender === filter;
       })
+      .filter((u) => {
+        if (selectedBranch !== 'all' && (u.branch || 'CSE') !== selectedBranch) return false;
+        if (selectedYear !== 'all' && (u.college_year || '1st Year') !== selectedYear) return false;
+        if (selectedVibe !== 'all' && u.vibe_tag !== selectedVibe) return false;
+        return true;
+      })
       .sort((a, b) => Number(onlineIds.has(b.clerk_id)) - Number(onlineIds.has(a.clerk_id)));
-  }, [users, query, filter, onlineIds]);
+  }, [users, query, filter, selectedBranch, selectedYear, selectedVibe, onlineIds]);
 
   // Others online (presence includes me).
   const onlineCount = Math.max(0, onlineIds.size - (userId && onlineIds.has(userId) ? 1 : 0));
@@ -148,12 +184,17 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
             <div className="mx-auto flex max-w-3xl items-center gap-4 px-4 py-4 sm:px-6">
               <Avatar name={me.display_name} gender={me.gender} size={44} />
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <p className="truncate font-display text-lg text-haldi">{me.display_name}</p>
                   <GenderBadge gender={me.gender} />
                   {(me.branch || me.college_year) && (
                     <span className="rounded bg-paper/10 px-2 py-0.5 text-[11px] font-bold text-paper/80">
-                      {me.branch || 'CSE'} · {me.college_year ? me.college_year.replace(' Year', ' Yr') : '3rd Yr'}
+                      {me.branch || 'CSE'} · {me.college_year ? me.college_year.replace(' Year', ' Yr') : '1st Yr'}
+                    </span>
+                  )}
+                  {me.vibe_tag && (
+                    <span className="rounded-full bg-haldi/15 border border-haldi/30 px-2 py-0.5 text-[11px] font-medium text-haldi">
+                      {me.vibe_tag}
                     </span>
                   )}
                   <button
@@ -164,11 +205,21 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
                     Edit Profile
                   </button>
                 </div>
-                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-paper/60">
+                <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-paper/60">
                   <p>
                     <span className="mr-1.5 inline-block h-2 w-2 rounded-full bg-[#7FB069] align-middle" />
                     Online: <span className="tabular font-bold text-paper">{onlineCount}</span> dancers tonight
                   </p>
+                  {me.outfit_color && (
+                    <span className="text-paper/75">
+                      Wearing: <span className="italic text-paper">{me.outfit_color}</span>
+                    </span>
+                  )}
+                  {me.instagram_handle && (
+                    <span className="text-paper/40">
+                      Insta: <span className="text-paper/75">@{me.instagram_handle}</span> (hidden until ₹29 unlock)
+                    </span>
+                  )}
                   {me.email && (
                     <span className="text-paper/40">
                       Gmail: <span className="text-paper/75">{me.email}</span> (hidden until ₹29 unlock)
@@ -187,13 +238,15 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                aria-label="Search by nickname"
+                aria-label="Search by nickname or outfit"
                 autoComplete="off"
                 enterKeyHint="search"
-                placeholder="Search by nickname"
+                placeholder="Search by nickname or outfit hint..."
                 className="w-full bg-transparent text-[15px] text-paper placeholder:text-paper/35 focus:outline-none"
               />
             </label>
+
+            {/* Main quick filters */}
             <div role="group" aria-label="Filter dancers" className="mt-4 flex gap-2 overflow-x-auto pb-1">
               {FILTERS.map((f) => (
                 <button
@@ -201,13 +254,70 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
                   onClick={() => setFilter(f.id)}
                   aria-pressed={filter === f.id}
                   className={cn(
-                    'h-11 shrink-0 rounded-full border px-4 text-sm font-semibold transition-colors',
+                    'h-10 shrink-0 rounded-full border px-4 text-xs font-semibold transition-colors',
                     filter === f.id ? 'border-haldi bg-haldi text-ink' : 'border-paper/15 text-paper/70 hover:border-paper/40',
                   )}
                 >
                   {f.label}
                 </button>
               ))}
+            </div>
+
+            {/* Department, Year & Vibe filters */}
+            <div className="mt-2.5 flex items-center gap-2 overflow-x-auto pb-1 text-xs">
+              <select
+                value={selectedBranch}
+                onChange={(e) => setSelectedBranch(e.target.value)}
+                aria-label="Filter by Branch"
+                className="h-8 rounded-lg border border-paper/15 bg-ink-2 px-2.5 text-paper/80 focus:border-haldi focus:outline-none"
+              >
+                {BRANCH_OPTIONS.map((b) => (
+                  <option key={b} value={b === 'All Branches' ? 'all' : b} className="bg-ink-2 text-paper">
+                    {b}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={selectedYear}
+                onChange={(e) => setSelectedYear(e.target.value)}
+                aria-label="Filter by Year"
+                className="h-8 rounded-lg border border-paper/15 bg-ink-2 px-2.5 text-paper/80 focus:border-haldi focus:outline-none"
+              >
+                {YEAR_OPTIONS.map((y) => (
+                  <option key={y} value={y === 'All Years' ? 'all' : y} className="bg-ink-2 text-paper">
+                    {y}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={selectedVibe}
+                onChange={(e) => setSelectedVibe(e.target.value)}
+                aria-label="Filter by Vibe"
+                className="h-8 rounded-lg border border-paper/15 bg-ink-2 px-2.5 text-paper/80 focus:border-haldi focus:outline-none"
+              >
+                <option value="all" className="bg-ink-2 text-paper">All Vibes</option>
+                {VIBE_TAGS.map((v) => (
+                  <option key={v} value={v} className="bg-ink-2 text-paper">
+                    {v}
+                  </option>
+                ))}
+              </select>
+
+              {(selectedBranch !== 'all' || selectedYear !== 'all' || selectedVibe !== 'all') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedBranch('all');
+                    setSelectedYear('all');
+                    setSelectedVibe('all');
+                  }}
+                  className="rounded px-2 py-1 text-[11px] font-bold text-haldi hover:underline shrink-0"
+                >
+                  Reset Filters
+                </button>
+              )}
             </div>
           </div>
 
@@ -250,6 +360,9 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
         initialEmail={me?.email ?? ''}
         initialBranch={me?.branch}
         initialCollegeYear={me?.college_year}
+        initialVibeTag={me?.vibe_tag}
+        initialOutfitColor={me?.outfit_color}
+        initialInstagramHandle={me?.instagram_handle}
         onDone={() => {
           setEditOpen(false);
           router.refresh();

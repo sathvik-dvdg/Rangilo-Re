@@ -179,7 +179,7 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
           </Link>
           <Avatar name={partner.display_name} gender={partner.gender} size={40} online={partnerHere} />
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 flex-wrap">
               <p className="truncate font-display text-[15px] text-paper">
                 {revealed?.real_name ? revealed.real_name : partner.display_name}
               </p>
@@ -188,15 +188,32 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
                   Unlocked
                 </span>
               )}
-            </div>
-            <div className="mt-0.5 flex items-center gap-2">
               <GenderBadge gender={partner.gender} />
-              {revealed ? (
-                <span className="truncate text-xs text-paper/70">
+              {(partner.branch || partner.college_year) && (
+                <span className="rounded bg-paper/10 px-1.5 py-0.5 text-[10px] font-semibold text-paper/70">
+                  {partner.branch || 'CSE'} · {partner.college_year ? partner.college_year.replace(' Year', ' Yr') : '1st Yr'}
+                </span>
+              )}
+              {partner.vibe_tag && (
+                <span className="rounded-full bg-haldi/10 border border-haldi/25 px-2 py-0.5 text-[10px] font-medium text-haldi truncate max-w-[150px]">
+                  {partner.vibe_tag}
+                </span>
+              )}
+            </div>
+            <div className="mt-0.5 flex items-center gap-2 text-xs truncate">
+              {partner.outfit_color ? (
+                <span className="truncate text-paper/75">
+                  👘 <span className="italic">{partner.outfit_color}</span>
+                </span>
+              ) : revealed ? (
+                <span className="truncate text-paper/70">
                   {partner.display_name} {revealed.email && `· ${revealed.email}`}
                 </span>
               ) : (
-                <span className="text-xs text-paper/60">{partnerHere ? 'in the room' : 'away'}</span>
+                <span className="text-paper/60">{partnerHere ? 'in the room' : 'away'}</span>
+              )}
+              {partner.outfit_color && (
+                <span className="shrink-0 text-paper/40">· {partnerHere ? 'here' : 'away'}</span>
               )}
             </div>
           </div>

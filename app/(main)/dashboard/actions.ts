@@ -31,6 +31,9 @@ export async function completeOnboarding(input: {
   email?: string;
   branch?: string;
   collegeYear?: string;
+  vibeTag?: string;
+  outfitColor?: string;
+  instagramHandle?: string;
 }) {
   const { userId } = auth();
   if (!userId) return { error: 'Sign in first' };
@@ -57,6 +60,11 @@ export async function completeOnboarding(input: {
 
   const branch = (input.branch || 'CSE').trim();
   const collegeYear = (input.collegeYear || '3rd Year').trim();
+  const vibeTag = input.vibeTag ? input.vibeTag.trim().slice(0, 50) : null;
+  const outfitColor = input.outfitColor ? input.outfitColor.trim().slice(0, 100) : null;
+  const cleanInstagram = input.instagramHandle
+    ? input.instagramHandle.trim().replace(/^@+/, '').replace(/\s+/g, '').slice(0, 30)
+    : null;
 
   const userPayload: Record<string, unknown> = {
     clerk_id: userId,
@@ -66,12 +74,22 @@ export async function completeOnboarding(input: {
     email,
     branch,
     college_year: collegeYear,
+    vibe_tag: vibeTag,
+    outfit_color: outfitColor,
+    instagram_handle: cleanInstagram,
     is_online: true,
     last_seen: new Date().toISOString(),
   };
 
   let { error } = await supabaseAdmin().from('users').upsert(userPayload, { onConflict: 'clerk_id' });
-  if (error && error.message?.includes('branch')) {
+  if (error && (error.message?.includes('vibe_tag') || error.message?.includes('outfit_color') || error.message?.includes('instagram_handle'))) {
+    delete userPayload.vibe_tag;
+    delete userPayload.outfit_color;
+    delete userPayload.instagram_handle;
+    const retry = await supabaseAdmin().from('users').upsert(userPayload, { onConflict: 'clerk_id' });
+    error = retry.error;
+  }
+  if (error && (error.message?.includes('branch') || error.message?.includes('college_year'))) {
     delete userPayload.branch;
     delete userPayload.college_year;
     const retry = await supabaseAdmin().from('users').upsert(userPayload, { onConflict: 'clerk_id' });
