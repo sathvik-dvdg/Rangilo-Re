@@ -1,6 +1,7 @@
 import 'server-only';
 import { supabaseAdmin } from './supabaseAdmin';
 import { partnerFromRoomId } from './room';
+import { grantReveal } from './reveal';
 import { isRecord } from './utils';
 import type { PaymentType } from './types';
 
@@ -27,17 +28,21 @@ export type PaymentOrder = {
   status: PaymentOrderStatus;
   amount: number;
   currency: string;
+  /** What the order buys. Fixed when the order is created, never taken from a later request. */
+  product: PaymentType;
 };
 
 /** What create-order writes on the Razorpay order, for reading in their dashboard only. */
 export type OrderNotes = { type: PaymentType; userId: string; roomId: string };
 
-const ORDER_COLUMNS = 'user_id, room_id, order_id, payment_id, status, amount, currency';
+// Every column: `product` (migration 0008) may not exist yet, and a row without it is an extension.
+const ORDER_COLUMNS = '*';
 const EXTENSION_SECONDS = 120;
 
 function toPaymentOrder(row: unknown): PaymentOrder {
   if (isRecord(row)) {
     const { user_id, room_id, order_id, payment_id, status, amount, currency } = row;
+    const product: PaymentType = row.product === 'reveal' ? 'reveal' : 'extend';
     if (
       typeof user_id === 'string' &&
       typeof room_id === 'string' &&
@@ -46,13 +51,13 @@ function toPaymentOrder(row: unknown): PaymentOrder {
       typeof amount === 'number' &&
       typeof currency === 'string'
     ) {
-      return { user_id, room_id, order_id, payment_id: typeof payment_id === 'string' ? payment_id : null, status, amount, currency };
+      return { user_id, room_id, order_id, payment_id: typeof payment_id === 'string' ? payment_id : null, status, amount, currency, product };
     }
   }
   throw new Error('Malformed payment_orders row');
 }
 
-export async function recordOrder(order: { userId: string; roomId: string; orderId: string; amount: number; currency: string }) {
+export async function recordOrder(order: { userId: string; roomId: string; orderId: string; amount: number; currency: string; product: PaymentType }) {
   const { error } = await supabaseAdmin().from('payment_orders').insert({
     user_id: order.userId,
     room_id: order.roomId,
@@ -60,6 +65,8 @@ export async function recordOrder(order: { userId: string; roomId: string; order
     status: 'created',
     amount: order.amount,
     currency: order.currency,
+    // 'extend' is the column default, so an extension order needs no `product` column to exist.
+    ...(order.product === 'reveal' ? { product: 'reveal' } : {}),
   });
   if (error) throw error;
 }
@@ -73,11 +80,12 @@ export async function getOrder(orderId: string): Promise<PaymentOrder | null> {
 
 /**
  * A fulfilment failure that retrying cannot fix: the order's room is not one
- * the buyer is in, or it no longer exists. Anything else thrown while
- * settling (a database or network error) is treated as temporary.
+ * the buyer is in, it no longer exists, or (for a reveal) the other dancer's
+ * agreement is not there. Anything else thrown while settling (a database or
+ * network error) is treated as temporary.
  */
 export class FulfilmentError extends Error {
-  constructor(public reason: 'bad_room' | 'room_not_found') {
+  constructor(public reason: 'bad_room' | 'room_not_found' | 'consent_missing') {
     super(`Fulfilment failed: ${reason}`);
   }
 }
@@ -86,7 +94,8 @@ export class FulfilmentError extends Error {
 const FOREIGN_KEY_VIOLATION = '23503';
 
 /**
- * Grants the extension an order paid for and marks the order paid.
+ * Grants what an order paid for (a chat extension, or a name and photo reveal
+ * the other dancer already agreed to) and marks the order paid.
  * Idempotent: an order already marked paid is left alone, so the checkout
  * handler and the webhook (or a repeated webhook) grant once between them.
  *
@@ -104,21 +113,29 @@ export async function settlePayment(order: PaymentOrder, paymentId: string): Pro
     }
     return 'already_processed';
   }
-  if (!partnerFromRoomId(order.room_id, order.user_id)) throw new FulfilmentError('bad_room');
+  const partnerId = partnerFromRoomId(order.room_id, order.user_id);
+  if (!partnerId) throw new FulfilmentError('bad_room');
 
   const db = supabaseAdmin();
-  const grant = await db.from('chat_extensions').upsert(
-    {
-      room_id: order.room_id,
-      payment_id: paymentId,
-      extra_seconds: EXTENSION_SECONDS,
-      paid_at: new Date().toISOString(),
-    },
-    { onConflict: 'payment_id', ignoreDuplicates: true },
-  );
-  if (grant.error) {
-    if (grant.error.code === FOREIGN_KEY_VIOLATION) throw new FulfilmentError('room_not_found');
-    throw grant.error;
+  if (order.product === 'reveal') {
+    // Payment never stands in for consent (ID-002, PAY-011): the other dancer's yes is
+    // checked again now, and if it has gone the payer sees nothing and the order is kept
+    // for refund.
+    if ((await grantReveal(order.user_id, partnerId, paymentId)) === 'no_consent') throw new FulfilmentError('consent_missing');
+  } else {
+    const grant = await db.from('chat_extensions').upsert(
+      {
+        room_id: order.room_id,
+        payment_id: paymentId,
+        extra_seconds: EXTENSION_SECONDS,
+        paid_at: new Date().toISOString(),
+      },
+      { onConflict: 'payment_id', ignoreDuplicates: true },
+    );
+    if (grant.error) {
+      if (grant.error.code === FOREIGN_KEY_VIOLATION) throw new FulfilmentError('room_not_found');
+      throw grant.error;
+    }
   }
 
   const paid = await db.from('payment_orders').update({ status: 'paid', payment_id: paymentId }).eq('order_id', order.order_id).neq('status', 'paid');

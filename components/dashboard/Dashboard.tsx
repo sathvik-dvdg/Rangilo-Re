@@ -10,12 +10,13 @@ import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/button';
 import { GenderBadge } from '@/components/ui/GenderBadge';
 import { CampusEnergyBattle } from './CampusEnergyBattle';
+import { NotificationToggle } from './NotificationToggle';
 import { OnboardingModal } from './OnboardingModal';
 import { useLobbyPresence } from '@/hooks/useLobbyPresence';
 import { useAppStore } from '@/store/useAppStore';
 import { roomIdFor } from '@/lib/room';
 import { cn, timeAgo } from '@/lib/utils';
-import { VIBE_TAGS, type MyProfile, type PublicProfile } from '@/lib/types';
+import { VIBE_TAGS, type MyProfile, type PublicProfile, type RevealedIdentity } from '@/lib/types';
 
 type Filter = 'all' | 'female' | 'male' | 'online';
 const FILTERS: { id: Filter; label: string }[] = [
@@ -39,7 +40,9 @@ type RowData = {
   rows: PublicProfile[][];
   cols: number;
   onlineIds: Set<string>;
-  revealed: Record<string, { real_name: string; email: string }>;
+  /** Dancers who agreed to share their real name and photo with this viewer, by Clerk id. */
+  revealed: Record<string, RevealedIdentity>;
+  unread: Record<string, number>;
   open: (u: PublicProfile) => void;
 };
 
@@ -55,7 +58,8 @@ function Row({ index, style, data }: ListChildComponentProps<RowData>) {
 
 function DancerCard({ u, index, data }: { u: PublicProfile; index: number; data: RowData }) {
   const online = data.onlineIds.has(u.clerk_id);
-  const unlocked = data.revealed[u.clerk_id];
+  const shared = data.revealed[u.clerk_id];
+  const unread = data.unread[u.clerk_id] ?? 0;
   return (
     <div className="min-w-0">
       <motion.button
@@ -69,8 +73,8 @@ function DancerCard({ u, index, data }: { u: PublicProfile; index: number; data:
         )}
       >
         <div className="relative shrink-0">
-          <Avatar name={u.display_name} gender={u.gender} online={online} />
-          {!unlocked && (
+          <Avatar name={u.display_name} gender={u.gender} imageUrl={shared?.image_url} online={online} />
+          {!shared && (
             <span
               title="Identity Locked (Real identity hidden)"
               className={cn(
@@ -81,18 +85,25 @@ function DancerCard({ u, index, data }: { u: PublicProfile; index: number; data:
               <Lock className="h-2.5 w-2.5" />
             </span>
           )}
+          {unread > 0 && (
+            <span
+              aria-label={`${unread} unread ${unread === 1 ? 'message' : 'messages'}`}
+              className="tabular absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-ink bg-haldi px-1 text-[11px] font-bold text-ink"
+            >
+              {unread}
+            </span>
+          )}
         </div>
 
         <div className="min-w-0 flex-1 border-b border-paper/[0.07] pb-2 pt-2 lg:border-b-0 lg:py-0">
-          {/* Top line: Name, Unlocked badge (if revealed), Gender, Branch, Vibe */}
+          {/* Top line: real name if they shared it (else nickname), Shared badge, Gender, Branch, Vibe */}
           <div className="flex items-center gap-1.5 flex-wrap">
-            <p className="truncate font-display text-[15px] font-semibold text-paper">
-              {unlocked?.real_name ? unlocked.real_name : u.display_name}
+            <p className="truncate font-display text-[15px] font-semibold text-paper" title={shared?.real_name ? u.display_name : undefined}>
+              {shared?.real_name ? shared.real_name : u.display_name}
             </p>
-            {unlocked && (
-              <span className="flex items-center gap-1 rounded bg-[#7FB069]/20 border border-[#7FB069]/30 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#9CC587]">
-                <Unlock className="h-2.5 w-2.5" />
-                Unlocked
+            {shared && (
+              <span className="rounded bg-[#7FB069]/20 border border-[#7FB069]/30 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#9CC587]">
+                Shared with you
               </span>
             )}
             <GenderBadge gender={u.gender} />
@@ -126,11 +137,7 @@ function DancerCard({ u, index, data }: { u: PublicProfile; index: number; data:
                 {online ? 'Online' : timeAgo(u.last_seen)}
               </span>
             )}
-            {unlocked?.email && (
-              <span className="shrink-0 text-[11px] text-paper/50">
-                {unlocked.email}
-              </span>
-            )}
+            {shared?.real_name && <span className="hidden shrink-0 truncate text-[11px] text-paper/45 sm:inline">{u.display_name}</span>}
           </div>
         </div>
       </motion.button>
@@ -142,9 +149,9 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
   const { userId } = useAuth();
   const router = useRouter();
   const onlineIds = useAppStore((s) => s.onlineIds);
-  const revealed = useAppStore((s) => s.revealed);
-  const setRevealedInStore = useAppStore((s) => s.setRevealed);
+  const unread = useAppStore((s) => s.unread);
   const [users, setUsers] = useState<PublicProfile[] | null>(null);
+  const [revealed, setRevealed] = useState<Record<string, RevealedIdentity>>({});
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
@@ -155,6 +162,17 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
   const [editOpen, setEditOpen] = useState(false);
 
   useLobbyPresence(me ? userId ?? null : null);
+
+  // Names and photos other dancers agreed to share with me. The list still works if this fails.
+  useEffect(() => {
+    if (!me) return;
+    fetch('/api/reveals')
+      .then((r) => (r.ok ? r.json() : { revealed: [] }))
+      .then((d: { revealed?: ({ clerk_id: string } & RevealedIdentity)[] }) =>
+        setRevealed(Object.fromEntries((d.revealed ?? []).map(({ clerk_id, ...identity }) => [clerk_id, identity]))),
+      )
+      .catch(() => {});
+  }, [me]);
 
   useEffect(() => {
     if (!me) return;
@@ -206,8 +224,13 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
         if (selectedVibe !== 'all' && u.vibe_tag !== selectedVibe) return false;
         return true;
       })
-      .sort((a, b) => Number(onlineIds.has(b.clerk_id)) - Number(onlineIds.has(a.clerk_id)));
-  }, [users, query, filter, selectedBranch, selectedYear, selectedVibe, onlineIds, revealed]);
+      // Anyone who has messaged you comes first, then whoever is online.
+      .sort(
+        (a, b) =>
+          Number(Boolean(unread[b.clerk_id])) - Number(Boolean(unread[a.clerk_id])) ||
+          Number(onlineIds.has(b.clerk_id)) - Number(onlineIds.has(a.clerk_id)),
+      );
+  }, [users, query, filter, selectedBranch, selectedYear, selectedVibe, onlineIds, unread]);
 
   // Others online (presence includes me).
   const onlineCount = Math.max(0, onlineIds.size - (userId && onlineIds.has(userId) ? 1 : 0));
@@ -243,9 +266,10 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
       cols,
       onlineIds,
       revealed,
+      unread,
       open: (u) => userId && router.push(`/chat/${encodeURIComponent(roomIdFor(userId, u.clerk_id))}`),
     };
-  }, [visible, cols, onlineIds, revealed, userId, router]);
+  }, [visible, cols, onlineIds, revealed, unread, userId, router]);
 
   const lobbyNotice = (
     <div className="flex items-center gap-2 rounded-xl border border-haldi/20 bg-ink-2/80 px-3.5 py-2 text-xs text-paper/75 shadow-sm lg:bg-ink/60">
@@ -312,7 +336,9 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
                 </div>
               </div>
 
-              <dl className="mt-4 hidden grid-cols-2 gap-3 lg:grid">
+              <NotificationToggle className="mt-3" />
+
+              <dl className="mt-3 hidden grid-cols-2 gap-3 lg:grid">
                 <div className="rounded-xl bg-ink/60 px-3.5 py-3">
                   <dt className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-paper/45">
                     <span className="h-1.5 w-1.5 rounded-full bg-[#7FB069]" />

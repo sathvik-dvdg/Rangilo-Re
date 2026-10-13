@@ -6,10 +6,12 @@ import { motion } from 'framer-motion';
 import { SignedIn, SignedOut, UserButton } from '@clerk/nextjs';
 import { Mark } from '@/components/ui/Mark';
 import { buttonVariants } from '@/components/ui/button';
+import { totalUnread, useAppStore } from '@/store/useAppStore';
 import { cn } from '@/lib/utils';
 
 export function Navbar() {
   const pathname = usePathname();
+  const unread = useAppStore(totalUnread);
   // The chat screen has its own header.
   if (pathname.startsWith('/chat')) return null;
 
@@ -30,6 +32,11 @@ export function Navbar() {
             {pathname !== '/dashboard' && (
               <Link href="/dashboard" className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'h-11 sm:h-9')}>
                 Dancers
+                {unread > 0 && (
+                  <span aria-label={`${unread} unread`} className="tabular flex h-5 min-w-5 items-center justify-center rounded-full bg-kumkum px-1.5 text-[11px] font-bold text-paper">
+                    {unread}
+                  </span>
+                )}
               </Link>
             )}
             <UserButton afterSignOutUrl="/" />

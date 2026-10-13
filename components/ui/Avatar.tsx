@@ -145,12 +145,15 @@ export function Avatar({
   gender,
   size = 48,
   online,
+  imageUrl,
   className,
 }: {
   name: string;
   gender?: Gender;
   size?: number;
   online?: boolean;
+  /** A dancer's real photo. Pass it only where they have agreed to share it (ID-001). */
+  imageUrl?: string | null;
   className?: string;
 }) {
   const [a, b] = avatarColors(name);
@@ -158,7 +161,11 @@ export function Avatar({
   return (
     <div className={cn('relative shrink-0 overflow-visible', className)} style={{ width: size, height: size }}>
       <div className="h-full w-full overflow-hidden rounded-full shadow-sm">
-        {gender === 'female' ? (
+        {imageUrl ? (
+          // A plain <img>: the photo is served by Clerk, and no-referrer keeps this page's URL (which holds user ids) out of that request.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={imageUrl} alt="" referrerPolicy="no-referrer" loading="lazy" className="h-full w-full object-cover" />
+        ) : gender === 'female' ? (
           <FemaleAvatar />
         ) : gender === 'male' ? (
           <MaleAvatar />

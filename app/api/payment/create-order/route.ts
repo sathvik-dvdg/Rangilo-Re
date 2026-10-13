@@ -1,6 +1,7 @@
 import { billingDisabledResponse } from '@/lib/billing';
 import { recordOrder, type OrderNotes } from '@/lib/payments';
 import { razorpay } from '@/lib/razorpay';
+import { hasRealName, isRevealAllowed } from '@/lib/reveal';
 import { PRICE_PAISE, partnerFromRoomId } from '@/lib/room';
 import { HttpError, errorResponse, requireUserId } from '@/lib/server';
 import { isRecord } from '@/lib/utils';
@@ -21,9 +22,16 @@ export async function POST(req: Request) {
     const type = isRecord(body) ? body.type : undefined;
     const roomId = isRecord(body) ? body.roomId : undefined;
 
-    // The chat extension is the only paid product. Identity is never sold (DEC-002, ID-002).
-    if (type !== 'extend') throw new HttpError(400, 'Unknown payment type');
-    if (typeof roomId !== 'string' || !partnerFromRoomId(roomId, userId)) throw new HttpError(400, 'Unknown room');
+    if (type !== 'extend' && type !== 'reveal') throw new HttpError(400, 'Unknown payment type');
+    const partnerId = typeof roomId === 'string' ? partnerFromRoomId(roomId, userId) : null;
+    if (typeof roomId !== 'string' || !partnerId) throw new HttpError(400, 'Unknown room');
+
+    // A reveal can be bought only after the other dancer has agreed, and only while that
+    // agreement stands. The buyer cannot create it, and neither can this route (ID-001, PAY-017).
+    if (type === 'reveal') {
+      if (!(await isRevealAllowed(userId, partnerId))) throw new HttpError(409, 'They have not agreed to share their name and photo');
+      if (!(await hasRealName(partnerId))) throw new HttpError(409, 'They have no name to share yet');
+    }
 
     // Amount is fixed here, never taken from the client.
     const notes: OrderNotes = { type, userId, roomId };
@@ -34,7 +42,7 @@ export async function POST(req: Request) {
       notes,
     });
     // The ledger row, not the Razorpay notes, is what verify and the webhook act on.
-    await recordOrder({ userId, roomId, orderId: order.id, amount: PRICE_PAISE, currency: CURRENCY });
+    await recordOrder({ userId, roomId, orderId: order.id, amount: PRICE_PAISE, currency: CURRENCY, product: type });
 
     return Response.json({
       orderId: order.id,

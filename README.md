@@ -43,9 +43,27 @@ The name shown on the sign-in screen ("Sign in to …") is the application name 
 1. Create a project and copy the URL, the anon key and the service-role key.
 2. Under **Authentication → Sign In / Providers → Third-party auth**, add **Clerk** and paste your Clerk domain. Browser requests then carry the Clerk session token, and RLS reads the Clerk user id from `auth.jwt()->>'sub'`.
 3. Set `NEXT_PUBLIC_SUPABASE_URL` to the **Project URL** only (`https://<ref>.supabase.co`). Don't add `/rest/v1` and don't use the dashboard link. If the URL or keys are wrong, or the tables are missing, `/dashboard` and `/chat` show a screen saying exactly which one, and API routes return `503`.
-4. Run `supabase/migrations/0001_init.sql` in the SQL editor. It creates the tables, RLS policies and the Realtime publication. Schema changes go in new numbered migration files; never edit one that has been applied.
+4. Run `supabase/migrations/0001_init.sql` in the SQL editor. It creates the tables, RLS policies and the Realtime publication. Then run `0004_campus_branch.sql` and `0005_campus_vibe_outfit_instagram.sql`, which add the campus profile fields (branch, year, vibe, outfit, Instagram handle). The other migrations belong to optional features and are named in the sections below: `0006` notifications, `0007` admin console, `0002`, `0003` and `0008` Paid Mode. Schema changes go in new numbered migration files; never edit one that has been applied.
 
-### 3. Razorpay (optional, off by default)
+### 3. Notifications (optional)
+
+In-app notifications for new messages need no setup. To also notify people when the app is in the background or closed (Web Push):
+
+1. Run `supabase/migrations/0006_push_subscriptions.sql` in the SQL editor.
+2. Generate a key pair with `npx web-push generate-vapid-keys` and set `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and `VAPID_SUBJECT` (a `mailto:` or `https:` contact URL). Use a different pair per environment and keep the private key server-side.
+3. Each dancer turns notifications on from the dashboard. Notifications show the sender's nickname only, never the message. On iPhone, Safari delivers push only to a site added to the home screen.
+
+### 4. Admin console (optional)
+
+`/admin` lets an admin see the dancer roster (including real names and emails), remove a dancer, remove and block a dancer, and remove a chat room. It is a 404 for everyone else.
+
+1. Run `supabase/migrations/0007_admin_actions.sql` in the SQL editor. It creates the audit log; the console refuses to show the roster or remove anything without it.
+2. Make an account an admin in Clerk: [dashboard.clerk.com](https://dashboard.clerk.com) → **Users** → the user → **Metadata** → **Public** → set `{ "role": "admin" }`. Use Public metadata, not Unsafe: users can edit their own unsafe metadata. Nobody is an admin until you do this.
+3. Sign in with that account and open `/admin`. The role is read from Clerk on each request, so adding or removing it takes effect straight away.
+
+Every roster view and removal is recorded. "Remove & block" bans the account in Clerk; unblock it from the Clerk dashboard. The console does not show message text.
+
+### 5. Razorpay (optional, off by default)
 
 Skip this unless you are working on Paid Mode. See [Billing modes](#billing-modes).
 
@@ -66,7 +84,9 @@ The server decides the mode in one place, [`lib/billing.ts`](lib/billing.ts), fr
 
 **Do not enable Paid Mode in production.** The gates in `OBJECTIVES.md` §8 (written provider eligibility, policies, payment testing, monitoring, legal review) and follow-ups FU-001 to FU-003 are not met.
 
-To work on Paid Mode with test keys: copy the key id and secret from Razorpay Dashboard → Settings → API Keys (test mode), add a webhook at `https://<your-domain>/api/webhooks/razorpay` for `payment.captured` and `payment.failed`, put its secret in `RAZORPAY_WEBHOOK_SECRET`, run `supabase/migrations/0002_payment_orders.sql` and then `0003_fulfilment_failed_and_webhook_events.sql` in the SQL editor (the payment ledger and the webhook event log), and set `BILLING_MODE=paid`. The only paid product is the ₹29 chat extension.
+To work on Paid Mode with test keys: copy the key id and secret from Razorpay Dashboard → Settings → API Keys (test mode), add a webhook at `https://<your-domain>/api/webhooks/razorpay` for `payment.captured` and `payment.failed`, put its secret in `RAZORPAY_WEBHOOK_SECRET`, run `supabase/migrations/0002_payment_orders.sql`, then `0003_fulfilment_failed_and_webhook_events.sql`, then `0008_reveal_requests.sql` in the SQL editor (the payment ledger, the webhook event log, and the name-and-photo requests), and set `BILLING_MODE=paid`.
+
+There are two ₹29 products. The chat extension adds two minutes. The reveal shows the buyer the other dancer's real name and profile photo, and it works by consent: a dancer asks for free, the other dancer allows or declines, and only after an allow can the first one pay. Payment alone never reveals anyone, and email is never shared.
 
 ## Checks
 
