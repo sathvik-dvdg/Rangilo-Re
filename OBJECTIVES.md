@@ -105,11 +105,11 @@ Razorpay ──► POST /api/webhooks/razorpay (signature-checked, no Clerk auth
 | `POST /api/payment/verify` | `requireUserId` | HMAC check, ledger ownership check, payment fetched from Razorpay and checked (`captured`, order id, amount, currency), `fulfilOrder()`; returns `{ verified }` |
 | `POST /api/webhooks/razorpay` | Signature only | Skips an event id already in `webhook_events`; `payment.captured` → `fulfilOrder()`; `payment.failed` → ledger `failed`; then records the event id and outcome |
 
-### 3.4 Data model — Verified (source), `supabase/migrations/0001_init.sql`, `0002_payment_orders.sql`, `0003_fulfilment_failed_and_webhook_events.sql`
+### 3.4 Data model — Verified (source), `supabase/migrations/0001_init.sql`, `0002_payment_orders.sql`, `0003_fulfilment_failed_and_webhook_events.sql`, `0004_campus_branch.sql`, `0005_campus_vibe_outfit_instagram.sql`
 
 | Table | Key columns | RLS read policy | Client writes |
 |---|---|---|---|
-| `users` | `clerk_id` unique, `display_name` unique, `gender`, `real_name`, `email`, `is_online`, `last_seen` | own row only | none (no write policies) |
+| `users` | `clerk_id` unique, `display_name` unique, `gender`, `real_name`, `email`, `is_online`, `last_seen`; `branch`, `college_year` (0004); `vibe_tag`, `outfit_color`, `instagram_handle` (0005, all added 2026-10-14) | own row only | none (no write policies) |
 | `rooms` | `id` = sorted Clerk ids joined by `_`, `participant_ids[2]`, `timer_started_at` | participants | none |
 | `messages` | `room_id` FK, `sender_id` (no FK), `text` 1–1000 chars, `read_by[]` | room participants | none |
 | `reveals` | `payer_id`, `target_id`, `payment_id` unique, unique(`payer_id`,`target_id`) | payer | none |
@@ -360,7 +360,7 @@ Classification of what exists today. "Implemented — unverified" means the code
 - **Requirement:** Collect only data with a stated purpose. Real name and email are copied from Clerk into `users` only if the identity-sharing feature (DEC-002) needs them, and the user is told why. Profile photos are not collected unless used.
 - **Why:** DPDP-style purpose limitation; reduces breach impact.
 - **Files:** `actions.ts:30-45` copies `real_name`, `email`; `components/dashboard/OnboardingModal.tsx:29-32` uploads a profile photo to Clerk that the app never displays (`components/ui/Avatar.tsx` is initials-only).
-- **Status:** Conflicts.
+- **Status:** Conflicts. Since the 2026-10-14 merge of `origin/main`, onboarding also collects `branch`, `college_year`, `vibe_tag` and `outfit_color` (public, shown in discovery and the campus leaderboard) and `instagram_handle` (private). No code path shows `instagram_handle` to anyone, so it is collected with no current purpose; whether to keep it for the ID-004 exchange or stop collecting it needs an owner decision.
 - **Depends on:** DEC-002, PRIV-006.
 - **Acceptance:** Every stored personal field maps to a documented purpose in the privacy notice; unused collection removed.
 - **Evidence:** Data inventory in privacy notice; code review.
@@ -369,7 +369,7 @@ Classification of what exists today. "Implemented — unverified" means the code
 #### DISC-001 — Discovery returns public fields only
 - **Requirement:** Discovery responses contain only approved public fields, exclude blocked users in both directions, and exclude users who have opted out of discovery or deleted their account.
 - **Files:** `app/api/users/route.ts`, `lib/server.ts:7`.
-- **Status:** Partial — public columns only; no block/opt-out filtering; returns `clerk_id` and `last_seen` for up to 2000 users to any signed-in account.
+- **Status:** Partial — public columns only; no block/opt-out filtering; returns `clerk_id` and `last_seen` for up to 2000 users to any signed-in account. Since the 2026-10-14 merge of `origin/main` the response also carries `branch`, `college_year`, `vibe_tag` and `outfit_color`; these are not yet recorded as approved public fields by an owner decision (DEC-009). `tests/campus-privacy.test.ts` asserts that `real_name`, `email` and `instagram_handle` are never selected or returned (database mocked; passing locally 2026-10-14).
 - **Depends on:** SAFE-001, DEC-009.
 - **Acceptance:** Response schema test asserts exact key set; blocked users absent.
 - **Evidence:** TEST-003.
@@ -654,8 +654,8 @@ Razorpay onboarding and product eligibility are **unresolved**. The ability to c
 
 #### SEC-004 — Input validation
 - **Requirement:** All route inputs validated for type and size; IDs validated for format before use.
-- **Files:** route handlers (ad-hoc casts like `as Record<string,string>`).
-- **Status:** Partial.
+- **Files:** route handlers (ad-hoc casts like `as Record<string,string>`); `app/(main)/dashboard/actions.ts` (`completeOnboarding`).
+- **Status:** Partial. `completeOnboarding` stores `branch` and `collegeYear` trimmed but with no length cap or allow-list, and `vibeTag` as free text up to 50 characters, although the UI offers fixed choices; all three are shown to every signed-in user.
 - **Depends on:** —
 - **Acceptance:** Malformed-input tests return 400, never 500.
 - **Evidence:** TEST-003.
@@ -664,7 +664,7 @@ Razorpay onboarding and product eligibility are **unresolved**. The ability to c
 #### PRIV-001 — Real name and email private by default
 - **Requirement:** `real_name` and `email` are never returned to anyone except the user themself, and to another participant only via ID-001 consent.
 - **Files:** `lib/server.ts:7`, migration `users` policy, `getRevealed` (`lib/server.ts:88-105`).
-- **Status:** **Conflicts** — `getRevealed` returns the target's real name and email to anyone with a `reveals` row, and `reveals` rows were created by payment alone. Since 2026-10-14 no code creates `reveals` rows (paid reveal purchase path removed), but existing rows are still displayed pending DEC-003.
+- **Status:** **Conflicts** — `getRevealed` returns the target's real name and email to anyone with a `reveals` row, and `reveals` rows were created by payment alone. Since 2026-10-14 no code creates `reveals` rows (paid reveal purchase path removed), but existing rows are still displayed pending DEC-003. The 2026-10-14 merge of `origin/main` did not accept an incoming change that added `instagram_handle` to what `getRevealed` returns; it still returns `real_name` and `email` only (`tests/campus-privacy.test.ts`).
 - **Depends on:** ID-001.
 - **Acceptance:** Test: user B's `real_name`/`email` never appear in any response to user A unless B consented to share with A.
 - **Evidence:** TEST-003.
@@ -797,8 +797,8 @@ Razorpay onboarding and product eligibility are **unresolved**. The ability to c
 
 #### DATA-001 — Migrations are the only schema source
 - **Requirement:** Schema changes are new numbered files in `supabase/migrations/`; applied migrations are never edited; migrations are applied with a tool that records versions (e.g. Supabase CLI), not by pasting into the SQL editor.
-- **Files:** `supabase/migrations/0001_init.sql`, `0002_payment_orders.sql`, `0003_fulfilment_failed_and_webhook_events.sql` (both 2026-10-14); README setup steps.
-- **Status:** Partial.
+- **Files:** `supabase/migrations/0001_init.sql`, `0002_payment_orders.sql`, `0003_fulfilment_failed_and_webhook_events.sql` (both 2026-10-14), `0004_campus_branch.sql`, `0005_campus_vibe_outfit_instagram.sql` (merged 2026-10-14); README setup steps.
+- **Status:** Partial. The two campus migrations arrived from `origin/main` numbered 0002 and 0003, colliding with the payment migrations; the merge renumbered them to 0004 and 0005 with their SQL unchanged (`add column if not exists`, so re-running them is harmless). Whether they were already pasted into a live database under the old names is *Information Required*. The README setup steps do not mention them yet, and the server tolerates their absence by retrying with fewer columns.
 - **Depends on:** DEP-002.
 - **Acceptance:** Fresh local database built only from migrations matches production schema diff = empty.
 - **Evidence:** Schema diff output.
@@ -952,7 +952,7 @@ Known limitations of the Free Mode gate, tracked here so they are not mistaken f
 |---|---|---|---|---|
 | **FU-001** | **Webhook event loss.** In any non-paid state a correctly signed webhook is acknowledged with 200 and only logged, not persisted, so Razorpay will not retry it. A genuine payment from an earlier Paid Mode period that needs fulfilment after a rollback could be missed; until a ledger exists the only trace is the server log line (subject to the host's log retention). | Highest | Durable payment ledger (PAY-003), persisted webhook events, and reconciliation against Razorpay (PAY-013) that can recover missed events, all before any paid transaction is accepted. The Paid Mode rollback rehearsal (OPS-005) must show no lost payment. *Progress 2026-10-14, still open:* the ledger exists (PAY-003) and webhook events handled in Paid Mode are persisted in `webhook_events` (PAY-008); an event received while billing is off is still only logged, and there is no reconciliation or rehearsal. | FREE-004, PAY-003, PAY-008, PAY-013, OPS-005 |
 | **FU-002** | **Environment detection.** The live-key rule uses `NODE_ENV === 'production'`, which is also true for preview deployments, so a preview could accept `rzp_live_` keys. | High | An explicit, trusted deployment-environment signal (e.g. a platform-set variable, once hosting is confirmed) that allows live keys only on the production deployment, with tests. | CFG-002, DEP-001 |
-| **FU-003** | **Identity disclosure.** *Done 2026-10-14:* the paid reveal purchase path is removed (button, `RevealModal`, `reveal` payment type, route and hook handling). *Still open:* identities from existing `reveals` rows are still displayed (`getRevealed`, `RevealCard`), including in Free Mode, which conflicts with DEC-002. | High | Remove the paid reveal path. Separately, first establish whether any live Razorpay payments were ever taken, then decide DEC-003 and handle historical records (stop display; refunds if needed). Do not delete records before that decision. | PRIV-001, ID-002, DEC-003 |
+| **FU-003** | **Identity disclosure.** *Done 2026-10-14:* the paid reveal purchase path is removed (button, `RevealModal`, `reveal` payment type, route and hook handling). *Still open:* identities from existing `reveals` rows are still displayed (`getRevealed`, `RevealCard`), including in Free Mode, which conflicts with DEC-002. *2026-10-14 merge of `origin/main`:* incoming work assumed the paid reveal still exists ("unlock for ₹29" copy in the dashboard and onboarding, Instagram handle added to the reveal). DEC-002 stands, so that copy was replaced with the existing "Paying never unlocks them" wording and the `getRevealed` change was not accepted; the collaborators need to be told. | High | Remove the paid reveal path. Separately, first establish whether any live Razorpay payments were ever taken, then decide DEC-003 and handle historical records (stop display; refunds if needed). Do not delete records before that decision. | PRIV-001, ID-002, DEC-003 |
 
 ### Decisions required
 
@@ -1012,8 +1012,8 @@ Status abbreviations: **V** Verified (scope in brackets, e.g. unit/route level) 
 | FREE-008 | Config ≠ approval | process | M | change record | Adopt §20 | GATE-* |
 | AUTH-001 | Auth on all surfaces | `middleware.ts`, `requireUserId` | IU | TEST-003 | Route-table test | — |
 | ONB-001 | Generated nicknames | `displayNames.ts`, `actions.ts` | IU | unit test | Write tests | — |
-| ONB-002 | Data minimisation | `actions.ts:30-45`, `OnboardingModal.tsx:29-32` | C | review | Remove unused collection | DEC-002 |
-| DISC-001 | Public fields, filtered | `api/users/route.ts` | P | TEST-003 | Add block/opt-out filter | SAFE-001, DEC-009 |
+| ONB-002 | Data minimisation | `actions.ts` (`completeOnboarding`), `OnboardingModal.tsx` | C | review | Remove unused collection; decide `instagram_handle` | DEC-002 |
+| DISC-001 | Public fields, filtered | `api/users/route.ts` | P | TEST-003; `tests/campus-privacy.test.ts` (private fields never selected) | Add block/opt-out filter; approve campus fields | SAFE-001, DEC-009 |
 | DISC-002 | Presence integrity | `useLobbyPresence.ts` | P | TEST-005 | See PRIV-005 | PRIV-005 |
 | CHAT-001 | 1:1 room access | `lib/room.ts`, `loadRoom` | IU | TEST-003 | Write tests | — |
 | CHAT-002 | Message integrity | `messages/route.ts`, RLS | IU | TEST-005 | Write tests | — |
@@ -1047,8 +1047,8 @@ Status abbreviations: **V** Verified (scope in brackets, e.g. unit/route level) 
 | SEC-001 | Secrets server-side | `lib/*` `server-only` | IU | bundle-name scan step in CI workflow; clean in local simulation (Clerk SDK's own `CLERK_SECRET_KEY` lookup excluded) | Run on GitHub | TEST-006 |
 | SEC-002 | AuthZ before service role | all `supabaseAdmin()` callers | IU | TEST-003 | Write tests | — |
 | SEC-003 | RLS correct | migration | IU | TEST-005 | Local Supabase tests | IR: live config |
-| SEC-004 | Input validation | route handlers | P | TEST-003 | Validate inputs | — |
-| PRIV-001 | Name/email private | `lib/server.ts` (`getRevealed`) | **C** | TEST-003 | Stop displaying existing `reveals` rows | DEC-003 |
+| SEC-004 | Input validation | route handlers, `actions.ts` | P | TEST-003 | Validate inputs; allow-list `branch`/`collegeYear`/`vibeTag` | — |
+| PRIV-001 | Name/email private | `lib/server.ts` (`getRevealed`) | **C** | TEST-003; `tests/campus-privacy.test.ts` (no `instagram_handle` via `reveals`) | Stop displaying existing `reveals` rows | DEC-003 |
 | PRIV-002 | No IDOR | `room.ts`, routes | IU | TEST-003/004 | Write tests | — |
 | PRIV-003 | No PII in logs | `lib/server.ts:23` | P | review | Sanitise | OPS-001 |
 | PRIV-004 | Deletion/retention | — | M | integration test | Design | DEC-006 |
@@ -1062,7 +1062,7 @@ Status abbreviations: **V** Verified (scope in brackets, e.g. unit/route level) 
 | SAFE-002 | Reporting | — | M | test + runbook | Build | DATA-001 |
 | SAFE-003 | 18+ self-declaration at onboarding | `OnboardingModal.tsx`, `actions.ts` | M | TEST-003, TEST-007 | Build | DATA-001; GATE-008 |
 | SAFE-004 | Abuse prevention | — | M | refs | — | CHAT-004/007 |
-| DATA-001 | Migrations only | `supabase/migrations/` (0001–0003) | P | schema diff | Adopt CLI | IR: live DB |
+| DATA-001 | Migrations only | `supabase/migrations/` (0001–0005) | P | schema diff | Adopt CLI; add 0004/0005 to README setup | IR: live DB |
 | DATA-002 | Entitlement linkage | migration | P | TEST-005 | With PAY-003 | PAY-003 |
 | DATA-003 | User referential integrity | migration | P | integration | With PRIV-004 | PRIV-004 |
 | DATA-004 | Timer monotonic | `timer/route.ts:21` | IU | TEST-003 | Write test | — |
