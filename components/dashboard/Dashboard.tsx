@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@clerk/nextjs';
 import { motion } from 'framer-motion';
 import { FixedSizeList, type ListChildComponentProps } from 'react-window';
-import { Search } from 'lucide-react';
+import { Search, Lock, Unlock, Shield } from 'lucide-react';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/button';
 import { GenderBadge } from '@/components/ui/GenderBadge';
@@ -56,9 +56,15 @@ function Row({ index, style, data }: ListChildComponentProps<RowData>) {
             <p className="truncate font-display text-[15px] text-paper">
               {unlocked?.real_name ? unlocked.real_name : u.display_name}
             </p>
-            {unlocked && (
-              <span className="rounded bg-haldi/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-haldi">
+            {unlocked ? (
+              <span className="flex items-center gap-1 rounded bg-haldi/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-haldi">
+                <Unlock className="h-2.5 w-2.5" />
                 Unlocked
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 rounded-full border border-paper/15 bg-paper/[0.05] px-1.5 py-0.5 text-[9px] font-semibold text-paper/60">
+                <Lock className="h-2.5 w-2.5 text-kumkum/80" />
+                Locked
               </span>
             )}
             <GenderBadge gender={u.gender} />
@@ -181,51 +187,77 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
       {me && (
         <>
           <div className="stitch-b bg-ink-2">
-            <div className="mx-auto flex max-w-3xl items-center gap-4 px-4 py-4 sm:px-6">
-              <Avatar name={me.display_name} gender={me.gender} size={44} />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <p className="truncate font-display text-lg text-haldi">{me.display_name}</p>
-                  <GenderBadge gender={me.gender} />
-                  {(me.branch || me.college_year) && (
-                    <span className="rounded bg-paper/10 px-2 py-0.5 text-[11px] font-bold text-paper/80">
-                      {me.branch || 'CSE'} · {me.college_year ? me.college_year.replace(' Year', ' Yr') : '1st Yr'}
-                    </span>
-                  )}
-                  {me.vibe_tag && (
-                    <span className="rounded-full bg-haldi/15 border border-haldi/30 px-2 py-0.5 text-[11px] font-medium text-haldi">
-                      {me.vibe_tag}
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setEditOpen(true)}
-                    className="ml-auto rounded border border-paper/15 px-2.5 py-1 text-xs font-semibold text-paper/70 hover:border-haldi hover:text-haldi transition-colors"
+            <div className="mx-auto max-w-3xl px-4 py-4 sm:px-6">
+              <div className="flex items-center gap-4">
+                <div className="relative shrink-0">
+                  <Avatar name={me.display_name} gender={me.gender} size={48} />
+                  <span
+                    title="Profile Locked"
+                    className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-ink-2 bg-kumkum text-paper shadow"
                   >
-                    Edit Profile
-                  </button>
+                    <Lock className="h-2.5 w-2.5" />
+                  </span>
                 </div>
-                <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-paper/60">
-                  <p>
-                    <span className="mr-1.5 inline-block h-2 w-2 rounded-full bg-[#7FB069] align-middle" />
-                    Online: <span className="tabular font-bold text-paper">{onlineCount}</span> dancers tonight
-                  </p>
-                  {me.outfit_color && (
-                    <span className="text-paper/75">
-                      Wearing: <span className="italic text-paper">{me.outfit_color}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="truncate font-display text-lg text-haldi">{me.display_name}</p>
+                    <GenderBadge gender={me.gender} />
+                    <span className="inline-flex items-center gap-1 rounded-full border border-kumkum/40 bg-kumkum/15 px-2.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-[#FF9E94] shadow-sm">
+                      <Lock className="h-2.5 w-2.5 text-kumkum animate-pulse" />
+                      Locked Profile
                     </span>
-                  )}
-                  {me.instagram_handle && (
-                    <span className="text-paper/40">
-                      Insta: <span className="text-paper/75">@{me.instagram_handle}</span> (hidden until ₹29 unlock)
-                    </span>
-                  )}
-                  {me.email && (
-                    <span className="text-paper/40">
-                      Gmail: <span className="text-paper/75">{me.email}</span> (hidden until ₹29 unlock)
-                    </span>
-                  )}
+                    {(me.branch || me.college_year) && (
+                      <span className="rounded bg-paper/10 px-2 py-0.5 text-[11px] font-bold text-paper/80">
+                        {me.branch || 'CSE'} · {me.college_year ? me.college_year.replace(' Year', ' Yr') : '1st Yr'}
+                      </span>
+                    )}
+                    {me.vibe_tag && (
+                      <span className="rounded-full bg-haldi/15 border border-haldi/30 px-2 py-0.5 text-[11px] font-medium text-haldi">
+                        {me.vibe_tag}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setEditOpen(true)}
+                      className="ml-auto rounded border border-paper/15 px-2.5 py-1 text-xs font-semibold text-paper/70 hover:border-haldi hover:text-haldi transition-colors"
+                    >
+                      Edit Profile
+                    </button>
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-paper/60">
+                    <p>
+                      <span className="mr-1.5 inline-block h-2 w-2 rounded-full bg-[#7FB069] align-middle" />
+                      Online: <span className="tabular font-bold text-paper">{onlineCount}</span> dancers tonight
+                    </p>
+                    {me.outfit_color && (
+                      <span className="text-paper/75">
+                        Wearing: <span className="italic text-paper">{me.outfit_color}</span>
+                      </span>
+                    )}
+                  </div>
                 </div>
+              </div>
+
+              {/* Eye-catching Profile Locked reminder banner */}
+              <div className="mt-3 flex flex-wrap sm:flex-nowrap items-center justify-between gap-2.5 rounded-xl border border-kumkum/30 bg-gradient-to-r from-kumkum/20 via-ink to-ink-3 px-3.5 py-2.5 text-xs shadow-sm">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-kumkum/25 text-[#FF9E94]">
+                    <Lock className="h-3.5 w-3.5" />
+                  </span>
+                  <div className="min-w-0 text-paper/80 text-[11.5px] leading-snug">
+                    <span className="font-extrabold text-paper">🔒 Profile Locked & Protected:</span>{' '}
+                    <span>
+                      Your Real Name, Gmail & Instagram are 100% hidden. Other dancers can only unlock your contact after paying ₹29.
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditOpen(true)}
+                  className="shrink-0 font-bold text-haldi hover:underline text-[11px] whitespace-nowrap ml-auto sm:ml-0"
+                >
+                  Edit Details →
+                </button>
               </div>
             </div>
           </div>
