@@ -57,15 +57,19 @@ export function HeroSection() {
             ))}
           </motion.h1>
 
-          <motion.p
+          <motion.div
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.75, duration: 0.6, ease }}
-            className="mt-5 max-w-md text-base leading-relaxed text-paper/75 sm:mt-6 sm:text-lg"
+            className="mt-5 max-w-md space-y-3 text-base leading-relaxed text-paper/80 sm:mt-6 sm:text-lg"
           >
-            See who else is at the garba, say hello under a nickname, and get two minutes to find out if
-            you dance well together. Your real name stays yours until someone pays to ask for it.
-          </motion.p>
+            <p className="font-medium text-paper">
+              Why wait for your partner to reply when you can find a new one yourself? 😄
+            </p>
+            <p className="text-sm leading-relaxed text-paper/70 sm:text-base">
+              Those ignored messages are not going to reply anytime soon. Try your luck and show off your Garba skills here—you never know who might be waiting to match your vibe!
+            </p>
+          </motion.div>
 
           <motion.div
             initial={{ opacity: 0, y: 16 }}
