@@ -1,6 +1,7 @@
 import 'server-only';
 import { auth } from '@clerk/nextjs/server';
 import { supabaseAdmin } from './supabaseAdmin';
+import { diagnoseDbError } from './dbDiagnosis';
 import { FREE_CHAT_MS, partnerFromRoomId } from './room';
 import type { MyProfile, PublicProfile, RevealedIdentity, RoomState } from './types';
 
@@ -25,6 +26,11 @@ export function requireUserId() {
 export function errorResponse(e: unknown) {
   if (e instanceof HttpError) return Response.json({ error: e.message }, { status: e.status });
   console.error(e);
+  const d = diagnoseDbError(e);
+  if (d) {
+    const problems = d.problems.map((p) => `${p.variable} ${p.reason}`);
+    return Response.json({ error: `${d.title}. ${d.hint}`, problems }, { status: 503 });
+  }
   return Response.json({ error: 'Something went wrong' }, { status: 500 });
 }
 
@@ -141,20 +147,14 @@ export async function getRevealed(payerId: string, targetId: string): Promise<Re
     .maybeSingle();
   if (error) throw error;
   if (!reveal) return null;
+  // Pre-existing reveals rows only (DEC-003). Never widen this to more fields, such as
+  // instagram_handle: nobody consented to that disclosure (PRIV-001, ID-001).
   const { data: user, error: uErr } = await db
     .from('users')
-    .select('real_name, email, instagram_handle')
+    .select('real_name, email')
     .eq('clerk_id', targetId)
     .single();
-  if (uErr) {
-    const fallback = await db
-      .from('users')
-      .select('real_name, email')
-      .eq('clerk_id', targetId)
-      .single();
-    if (fallback.error) throw fallback.error;
-    return fallback.data as RevealedIdentity;
-  }
+  if (uErr) throw uErr;
   return user as RevealedIdentity;
 }
 

@@ -29,6 +29,7 @@ create table if not exists public.users (
 alter table public.users enable row level security;
 -- No select policy for other users: real_name/email must never reach a
 -- browser that hasn't paid. Public fields are served by /api/users.
+drop policy if exists "users: read own row" on public.users;
 create policy "users: read own row" on public.users
   for select using (clerk_id = public.clerk_uid());
 
@@ -41,6 +42,7 @@ create table if not exists public.rooms (
 );
 
 alter table public.rooms enable row level security;
+drop policy if exists "rooms: participants read" on public.rooms;
 create policy "rooms: participants read" on public.rooms
   for select using (public.clerk_uid() = any (participant_ids));
 
@@ -57,6 +59,7 @@ create table if not exists public.messages (
 create index if not exists messages_room_created_idx on public.messages (room_id, created_at);
 
 alter table public.messages enable row level security;
+drop policy if exists "messages: participants read" on public.messages;
 create policy "messages: participants read" on public.messages
   for select using (
     exists (
@@ -76,6 +79,7 @@ create table if not exists public.reveals (
 );
 
 alter table public.reveals enable row level security;
+drop policy if exists "reveals: payer reads" on public.reveals;
 create policy "reveals: payer reads" on public.reveals
   for select using (payer_id = public.clerk_uid());
 
@@ -89,6 +93,7 @@ create table if not exists public.chat_extensions (
 );
 
 alter table public.chat_extensions enable row level security;
+drop policy if exists "extensions: participants read" on public.chat_extensions;
 create policy "extensions: participants read" on public.chat_extensions
   for select using (
     exists (
@@ -98,6 +103,16 @@ create policy "extensions: participants read" on public.chat_extensions
   );
 
 -- Realtime --------------------------------------------------------------
-alter publication supabase_realtime add table public.messages;
-alter publication supabase_realtime add table public.rooms;
-alter publication supabase_realtime add table public.chat_extensions;
+do $$
+begin
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'messages') then
+    alter publication supabase_realtime add table public.messages;
+  end if;
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'rooms') then
+    alter publication supabase_realtime add table public.rooms;
+  end if;
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'chat_extensions') then
+    alter publication supabase_realtime add table public.chat_extensions;
+  end if;
+end
+$$;

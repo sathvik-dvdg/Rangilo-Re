@@ -386,11 +386,11 @@ export function OnboardingModal({
                           <Lock className="h-3.5 w-3.5" />
                         </div>
                         <p className="text-xs font-bold uppercase tracking-wider text-paper/90">
-                          Private Details (Unlocked via ₹29)
+                          Private Details
                         </p>
                       </div>
                       <p className="mt-1.5 text-xs text-paper/60 leading-relaxed">
-                        These remain hidden. When another dancer pays ₹29 to unlock your identity, your real name, Gmail, and Instagram will be revealed to them.
+                        These remain hidden from other dancers. Paying never unlocks them.
                       </p>
 
                       <div className="mt-3.5 space-y-3">
@@ -425,7 +425,7 @@ export function OnboardingModal({
                             <label className="block text-xs font-semibold text-paper/80">
                               Instagram Handle
                             </label>
-                            <span className="text-[11px] text-paper/40">Private · ₹29 unlock only</span>
+                            <span className="text-[11px] text-paper/40">Private</span>
                           </div>
                           <div className="mt-1 flex items-center rounded-lg border border-paper/15 bg-ink-2 px-3 focus-within:border-haldi focus-within:ring-1 focus-within:ring-haldi transition-colors">
                             <span className="font-bold text-sm text-haldi">@</span>
@@ -439,7 +439,7 @@ export function OnboardingModal({
                             />
                           </div>
                           <p className="mt-1 text-[11px] text-paper/40">
-                            Never shown publicly; only shared upon a verified identity unlock.
+                            Never shown to other dancers.
                           </p>
                         </div>
                       </div>

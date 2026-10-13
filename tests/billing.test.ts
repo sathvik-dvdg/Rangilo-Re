@@ -2,7 +2,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   billingDisabledResponse,
+  getBillingMode,
   getBillingStatus,
+  isBillingEnabled,
   resetBillingDiagnostics,
   resolveRequestedMode,
 } from '@/lib/billing';
@@ -123,6 +125,19 @@ describe('CFG-002: Paid Mode fails closed', () => {
     for (const value of [...Object.values(READY), 'rzp_test_OtherKey1234567', 'tooshort']) {
       if (value.length > 4) expect(logged).not.toContain(value);
     }
+  });
+});
+
+describe('getBillingMode / isBillingEnabled', () => {
+  it.each([
+    ['free', false, { ...READY }],
+    ['free', false, { ...READY, BILLING_MODE: 'premium' }],
+    ['paid', true, { ...READY, BILLING_MODE: 'paid' }],
+    ['unavailable', false, { ...READY, BILLING_MODE: 'paid', RAZORPAY_WEBHOOK_SECRET: 'short' }],
+    ['unavailable', false, { BILLING_MODE: 'paid' }],
+  ])('mode is %s and enabled is %s', (mode, enabled, env) => {
+    expect(getBillingMode(env)).toBe(mode);
+    expect(isBillingEnabled(env)).toBe(enabled);
   });
 });
 

@@ -54,4 +54,5 @@ export type RoomState = {
   revealed: RevealedIdentity | null;
 };
 
-export type PaymentType = 'reveal' | 'extend';
+/** Paid products. Identity sharing is never one of them (DEC-002). */
+export type PaymentType = 'extend';

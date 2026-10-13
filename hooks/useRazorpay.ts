@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import type { PaymentType, RevealedIdentity } from '@/lib/types';
+import { isRecord } from '@/lib/utils';
 
 type RazorpayResponse = { razorpay_payment_id: string; razorpay_order_id: string; razorpay_signature: string };
 
@@ -12,14 +12,17 @@ declare global {
 }
 
 let scriptPromise: Promise<boolean> | null = null;
-function loadRazorpay() {
-  if (typeof window !== 'undefined' && window.Razorpay) return Promise.resolve(true);
-  scriptPromise ??= new Promise((resolve) => {
+function loadRazorpay(): Promise<boolean> {
+  if (typeof window === 'undefined') return Promise.resolve(false);
+  if (window.Razorpay) return Promise.resolve(true);
+  scriptPromise ??= new Promise<boolean>((resolve) => {
     const s = document.createElement('script');
     s.src = 'https://checkout.razorpay.com/v1/checkout.js';
     s.onload = () => resolve(true);
     s.onerror = () => {
+      // Forget the failed attempt and its tag so the next click can try again.
       scriptPromise = null;
+      s.remove();
       resolve(false);
     };
     document.body.appendChild(s);
@@ -27,65 +30,126 @@ function loadRazorpay() {
   return scriptPromise;
 }
 
-export type PaymentResult = { type: 'reveal'; identity: RevealedIdentity } | { type: 'extend' };
+export type CheckoutResult = { verified: true } | { verified: false; error: string };
+
+export type CheckoutOptions = {
+  orderId: string;
+  amount: number;
+  currency: string;
+  /** Public key id from create-order. Never a secret. */
+  keyId: string;
+  description?: string;
+  prefill?: { name?: string; email?: string };
+  onSuccess?: (result: { verified: true }) => void;
+  onFailure?: (error: string) => void;
+};
+
+const failed = (error: string): CheckoutResult => ({ verified: false, error });
+
+async function readJson(res: Response): Promise<Record<string, unknown>> {
+  const data: unknown = await res.json().catch(() => null);
+  return isRecord(data) ? data : {};
+}
+
+async function verifyPayment(response: RazorpayResponse): Promise<CheckoutResult> {
+  const unverified = failed('We could not verify that payment. If you were charged, it will unlock shortly.');
+  try {
+    const res = await fetch('/api/payment/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        razorpay_order_id: response.razorpay_order_id,
+        razorpay_payment_id: response.razorpay_payment_id,
+        razorpay_signature: response.razorpay_signature,
+      }),
+    });
+    const data = await readJson(res);
+    return res.ok && data.verified === true ? { verified: true } : unverified;
+  } catch {
+    return unverified;
+  }
+}
 
 /**
- * Opens Razorpay checkout for a ₹29 unlock. The server creates the order
- * (fixing the amount and what it unlocks) and verifies the signature; the UI
- * only changes after the server says the payment is good.
+ * Opens Razorpay checkout for an order the server already created. Resolves
+ * once the outcome is known: `{ verified: true }` only after the server has
+ * verified the payment (PAY-014: the client never grants anything itself),
+ * otherwise `{ verified: false, error }`. `onSuccess` / `onFailure` are called
+ * with the same outcome. Never rejects.
+ */
+export async function openCheckout({ orderId, amount, currency, keyId, description, prefill, onSuccess, onFailure }: CheckoutOptions): Promise<CheckoutResult> {
+  const Checkout = (await loadRazorpay()) ? window.Razorpay : undefined;
+
+  return new Promise<CheckoutResult>((resolve) => {
+    let settled = false;
+    const finish = (result: CheckoutResult) => {
+      if (settled) return;
+      settled = true;
+      if (result.verified) onSuccess?.(result);
+      else onFailure?.(result.error);
+      resolve(result);
+    };
+
+    if (!Checkout) return finish(failed('Could not load Razorpay. Check your connection.'));
+
+    const rzp = new Checkout({
+      key: keyId,
+      amount,
+      currency,
+      order_id: orderId,
+      name: 'GarbaConnect',
+      description,
+      prefill,
+      theme: { color: '#B23A2E' },
+      modal: { ondismiss: () => finish(failed('Payment cancelled.')) },
+      handler: async (response: RazorpayResponse) => finish(await verifyPayment(response)),
+    });
+    rzp.on('payment.failed', () => finish(failed('Payment failed. You have not been charged.')));
+    rzp.open();
+  });
+}
+
+/**
+ * Pays for a ₹29 chat extension. The server creates the order (fixing the
+ * amount and what it unlocks) and verifies the signature; the UI only changes
+ * after the server says the payment is good.
  */
 export function useRazorpay() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const pay = useCallback(
-    (type: PaymentType, ctx: { targetUserId?: string; roomId?: string; prefill?: { name?: string; email?: string } }) =>
-      new Promise<PaymentResult | null>(async (resolve) => {
-        setBusy(true);
-        setError(null);
-        const fail = (msg: string) => {
-          setError(msg);
-          setBusy(false);
-          resolve(null);
-        };
+  const pay = useCallback(async (roomId: string, prefill?: { name?: string; email?: string }): Promise<boolean> => {
+    setBusy(true);
+    setError(null);
+    const fail = (message: string) => {
+      setError(message);
+      setBusy(false);
+      return false;
+    };
 
-        if (!(await loadRazorpay()) || !window.Razorpay) return fail('Could not load Razorpay. Check your connection.');
+    let order: Record<string, unknown>;
+    try {
+      const res = await fetch('/api/payment/create-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'extend', roomId }),
+      });
+      order = await readJson(res);
+      if (!res.ok) return fail(typeof order.error === 'string' ? order.error : 'Could not start payment.');
+    } catch {
+      return fail('Could not start payment.');
+    }
 
-        const orderRes = await fetch('/api/payment/create-order', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type, targetUserId: ctx.targetUserId, roomId: ctx.roomId }),
-        });
-        const order = await orderRes.json().catch(() => ({}));
-        if (!orderRes.ok) return fail(order.error ?? 'Could not start payment.');
+    const { orderId, amount, currency, keyId } = order;
+    if (typeof orderId !== 'string' || typeof amount !== 'number' || typeof currency !== 'string' || typeof keyId !== 'string') {
+      return fail('Could not start payment.');
+    }
 
-        const rzp = new window.Razorpay({
-          key: order.keyId, // public key id only
-          amount: order.amount,
-          currency: order.currency,
-          order_id: order.orderId,
-          name: 'GarbaConnect',
-          description: type === 'reveal' ? 'Reveal Identity' : 'Extend Chat',
-          prefill: ctx.prefill,
-          theme: { color: '#B23A2E' },
-          modal: { ondismiss: () => fail('Payment cancelled.') },
-          handler: async (r: RazorpayResponse) => {
-            const res = await fetch('/api/payment/verify', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ orderId: r.razorpay_order_id, paymentId: r.razorpay_payment_id, signature: r.razorpay_signature }),
-            });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok || !data.success) return fail(data.error ?? 'We could not verify that payment. If you were charged, it will unlock shortly.');
-            setBusy(false);
-            resolve(data.type === 'reveal' ? { type: 'reveal', identity: data.identity } : { type: 'extend' });
-          },
-        });
-        rzp.on('payment.failed', () => fail('Payment failed. You have not been charged.'));
-        rzp.open();
-      }),
-    [],
-  );
+    const result = await openCheckout({ orderId, amount, currency, keyId, description: 'Extend Chat', prefill });
+    if (!result.verified) return fail(result.error);
+    setBusy(false);
+    return true;
+  }, []);
 
-  return { pay, busy, error, clearError: () => setError(null) };
+  return { pay, openCheckout, busy, error, clearError: () => setError(null) };
 }

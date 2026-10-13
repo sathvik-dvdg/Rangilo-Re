@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | Baseline v1 — established 2026-10-12 from a read-only review of commit `3b75369`. Updated 2026-10-13: decisions DEC-001/002/005; billing gate (CFG-001…003, FREE-004) and test runner (TEST-001). |
+| Status | Baseline v1 — established 2026-10-12 from a read-only review of commit `3b75369`. Updated 2026-10-13: decisions DEC-001/002/005; billing gate (CFG-001…003, FREE-004) and test runner (TEST-001). Updated 2026-10-14: payment ledger (PAY-003), Paid Mode test-key integration (PAY-002…009, PAY-015), paid reveal purchase path removed (ID-002, FU-003 in part). Later 2026-10-14: `verify` fetches the payment from Razorpay (PAY-006), `fulfilment_failed` state (PAY-010), webhook event ids recorded (PAY-008), migration `0003`. |
 | Owner | Project owner (product decisions) · whoever edits code (keeping this file accurate) |
 | Authority | This file is the authoritative specification for product behaviour, security boundaries and readiness gates. The source code is the authority on *current* behaviour. Where they disagree, the disagreement is recorded here as a gap, not silently resolved. |
 | Agent rules | [`CLAUDE.md`](CLAUDE.md) requires every coding task to consult this file. |
@@ -101,21 +101,23 @@ Razorpay ──► POST /api/webhooks/razorpay (signature-checked, no Clerk auth
 | `POST /api/rooms/[roomId]/messages` | same | Insert message; rejects after expiry |
 | `POST /api/rooms/[roomId]/read` | same | Read receipts |
 | `POST /api/rooms/[roomId]/timer` | same | Sets `timer_started_at` once both have sent a message |
-| `POST /api/payment/create-order` | `requireUserId` | Creates Razorpay order, ₹29 fixed server-side, purpose in order `notes` |
-| `POST /api/payment/verify` | `requireUserId` | HMAC check, fetch order, ownership check, `fulfill()` |
-| `POST /api/webhooks/razorpay` | Signature only | `payment.captured` → `fulfill()` |
+| `POST /api/payment/create-order` | `requireUserId` | Creates a Razorpay order for a chat extension, ₹29 fixed server-side, and a `payment_orders` ledger row |
+| `POST /api/payment/verify` | `requireUserId` | HMAC check, ledger ownership check, payment fetched from Razorpay and checked (`captured`, order id, amount, currency), `fulfilOrder()`; returns `{ verified }` |
+| `POST /api/webhooks/razorpay` | Signature only | Skips an event id already in `webhook_events`; `payment.captured` → `fulfilOrder()`; `payment.failed` → ledger `failed`; then records the event id and outcome |
 
-### 3.4 Data model — Verified (source), `supabase/migrations/0001_init.sql`
+### 3.4 Data model — Verified (source), `supabase/migrations/0001_init.sql`, `0002_payment_orders.sql`, `0003_fulfilment_failed_and_webhook_events.sql`, `0004_campus_branch.sql`, `0005_campus_vibe_outfit_instagram.sql`
 
 | Table | Key columns | RLS read policy | Client writes |
 |---|---|---|---|
-| `users` | `clerk_id` unique, `display_name` unique, `gender`, `real_name`, `email`, `is_online`, `last_seen` | own row only | none (no write policies) |
+| `users` | `clerk_id` unique, `display_name` unique, `gender`, `real_name`, `email`, `is_online`, `last_seen`; `branch`, `college_year` (0004); `vibe_tag`, `outfit_color`, `instagram_handle` (0005, all added 2026-10-14) | own row only | none (no write policies) |
 | `rooms` | `id` = sorted Clerk ids joined by `_`, `participant_ids[2]`, `timer_started_at` | participants | none |
 | `messages` | `room_id` FK, `sender_id` (no FK), `text` 1–1000 chars, `read_by[]` | room participants | none |
 | `reveals` | `payer_id`, `target_id`, `payment_id` unique, unique(`payer_id`,`target_id`) | payer | none |
 | `chat_extensions` | `room_id` FK, `payment_id` unique, `extra_seconds` | room participants | none |
+| `payment_orders` (0002, added 2026-10-14) | `user_id`, `room_id` (no FK), `order_id` unique, `payment_id` unique, `status` (`created`/`paid`/`failed`/`fulfilment_failed`, the last added by 0003), `amount`, `currency` | none (service role only) | none |
+| `webhook_events` (0003, added 2026-10-14) | `event_id` primary key (Razorpay event id), `event`, `order_id`, `payment_id` (no FKs), `outcome`, `received_at` | none (service role only) | none |
 
-Realtime publication: `messages`, `rooms`, `chat_extensions`. No `payments`/`orders` table, no audit table, no blocks/reports tables. Whether this migration is what is actually applied to any live database is *Information Required*; the README instructs pasting it into the SQL editor, so there is no migration-version tracking.
+Realtime publication: `messages`, `rooms`, `chat_extensions`. `webhook_events` records the webhook events handled in Paid Mode; there is no fuller payment-event audit table and no blocks/reports tables. Whether this migration is what is actually applied to any live database is *Information Required*; the README instructs pasting it into the SQL editor, so there is no migration-version tracking.
 
 ### 3.5 Environment variables — Verified (source), names only
 
@@ -271,7 +273,7 @@ Classification of what exists today. "Implemented — unverified" means the code
 - **Requirement:** Free Mode shows no prices, checkout buttons, "Secured by Razorpay" text, or marketing copy about paid unlocks. Each removed affordance is replaced by the Free Mode behaviour decided in DEC-001/DEC-002, never by a broken button.
 - **Why:** A coherent free experience; avoids advertising something that cannot be bought.
 - **Files:** `components/chat/ChatRoom.tsx:184-188` (Reveal ₹29), `components/chat/TimerExpiredOverlay.tsx:36-38` (Extend ₹29), `components/modals/RevealModal.tsx`, `ExtendModal.tsx`, `BottomSheet.tsx` (`RazorpayButton`), `components/landing/FeaturesReveal.tsx:23-24`, `StatsCounter.tsx:10`, `HeroSection.tsx:66`, `Testimonials.tsx:10`, `ClosingCta.tsx:21`.
-- **Status:** Partial. Chat payment UI hidden (asserted by `tests/smoke/free-mode.test.ts` (TEST-007, in-process, providers mocked; not a browser or provider test)) in Free Mode (reveal button, reveal/extend sheets; the paid expiry button is replaced by "Back to dancers"). Landing copy (`FeaturesReveal`, `StatsCounter`, `HeroSection`, `Testimonials`, `ClosingCta`) still advertises ₹29 — copy decision pending (PRIV-006, DEC-008).
+- **Status:** Partial. Chat payment UI hidden (asserted by `tests/smoke/free-mode.test.ts` (TEST-007, in-process, providers mocked; not a browser or provider test)) in Free Mode (reveal button, reveal/extend sheets; the paid expiry button is replaced by "Back to dancers"). Landing copy (`FeaturesReveal`, `StatsCounter`, `HeroSection`, `Testimonials`, `ClosingCta`) still advertises ₹29 — copy decision pending (PRIV-006, DEC-008). The reveal button and `RevealModal.tsx` were removed entirely on 2026-10-14 (DEC-002).
 - **Depends on:** CFG-004, DEC-001, DEC-002.
 - **Acceptance:** Search of rendered HTML for every Free Mode page finds no `₹`, `Razorpay`, `Pay`, `Unlock` strings; expiry and identity flows reach a defined end state.
 - **Evidence:** TEST-007 content assertions.
@@ -287,7 +289,7 @@ Classification of what exists today. "Implemented — unverified" means the code
 
   Any other event is recorded and logged, and grants nothing. **Until PAY-003 exists, the webhook in Free Mode grants nothing at all.** It verifies the signature, logs the event for manual review or refund, and returns 200. Razorpay order notes alone are never sufficient to fulfil in Free Mode.
 - **Why:** Requirements 6, 8 and 9. Customers who already paid must still be honoured after a rollback, but the webhook must not become a way to obtain entitlements while billing is disabled.
-- **Files:** `app/api/payment/create-order/route.ts`, `verify/route.ts`, `app/api/webhooks/razorpay/route.ts` (Free Mode gate added 2026-10-13; in effective Paid Mode the pre-existing notes-based fulfilment is unchanged).
+- **Files:** `app/api/payment/create-order/route.ts`, `verify/route.ts`, `app/api/webhooks/razorpay/route.ts` (Free Mode gate added 2026-10-13; since 2026-10-14 effective Paid Mode fulfils from the `payment_orders` ledger, not from order notes).
 - **Status:** Partial. Done: `create-order`/`verify` return 403 `billing_disabled` (503 `billing_unavailable` if Paid Mode is requested but not ready) before any body parsing, database or Razorpay access; in any non-paid state the webhook still rejects bad signatures, and for valid ones grants nothing, logs event/payment/order ids (no personal data) and returns 200. Not done, by design: the rollback-continuity path (needs PAY-003/006/011), and *recording* ignored events (only logged until a ledger exists).
 - **Depends on:** CFG-001; PAY-003, PAY-006, PAY-011 for the rollback-continuity path.
 - **Acceptance:** Tests: Free Mode `create-order`/`verify` → 403 with no SDK call; Free Mode webhook with no ledger row → no grant, event logged, 200; ledger row created in Free Mode or already fulfilled → no grant; paid-era ledger row with a verified captured payment → fulfilled exactly once; paid-era row whose payment fetch fails verification → no grant, alert (OPS-003).
@@ -358,7 +360,7 @@ Classification of what exists today. "Implemented — unverified" means the code
 - **Requirement:** Collect only data with a stated purpose. Real name and email are copied from Clerk into `users` only if the identity-sharing feature (DEC-002) needs them, and the user is told why. Profile photos are not collected unless used.
 - **Why:** DPDP-style purpose limitation; reduces breach impact.
 - **Files:** `actions.ts:30-45` copies `real_name`, `email`; `components/dashboard/OnboardingModal.tsx:29-32` uploads a profile photo to Clerk that the app never displays (`components/ui/Avatar.tsx` is initials-only).
-- **Status:** Conflicts.
+- **Status:** Conflicts. Since the 2026-10-14 merge of `origin/main`, onboarding also collects `branch`, `college_year`, `vibe_tag` and `outfit_color` (public, shown in discovery and the campus leaderboard) and `instagram_handle` (private). No code path shows `instagram_handle` to anyone, so it is collected with no current purpose; whether to keep it for the ID-004 exchange or stop collecting it needs an owner decision.
 - **Depends on:** DEC-002, PRIV-006.
 - **Acceptance:** Every stored personal field maps to a documented purpose in the privacy notice; unused collection removed.
 - **Evidence:** Data inventory in privacy notice; code review.
@@ -367,7 +369,7 @@ Classification of what exists today. "Implemented — unverified" means the code
 #### DISC-001 — Discovery returns public fields only
 - **Requirement:** Discovery responses contain only approved public fields, exclude blocked users in both directions, and exclude users who have opted out of discovery or deleted their account.
 - **Files:** `app/api/users/route.ts`, `lib/server.ts:7`.
-- **Status:** Partial — public columns only; no block/opt-out filtering; returns `clerk_id` and `last_seen` for up to 2000 users to any signed-in account.
+- **Status:** Partial — public columns only; no block/opt-out filtering; returns `clerk_id` and `last_seen` for up to 2000 users to any signed-in account. Since the 2026-10-14 merge of `origin/main` the response also carries `branch`, `college_year`, `vibe_tag` and `outfit_color`; these are not yet recorded as approved public fields by an owner decision (DEC-009). `tests/campus-privacy.test.ts` asserts that `real_name`, `email` and `instagram_handle` are never selected or returned (database mocked; passing locally 2026-10-14).
 - **Depends on:** SAFE-001, DEC-009.
 - **Acceptance:** Response schema test asserts exact key set; blocked users absent.
 - **Evidence:** TEST-003.
@@ -466,84 +468,84 @@ Everything in this section is **inactive until Paid Mode is effective** (CFG-002
 
 #### PAY-002 — Server-side catalogue, price and currency
 - **Requirement:** Products, prices and currency come from a server-side catalogue keyed by product id. The client sends only the product id and context ids. Fulfilment checks paid amount **and** currency against the catalogue entry recorded on the order.
-- **Files:** `lib/room.ts:24` (`PRICE_PAISE`), `create-order/route.ts:31-36` (amount and `'INR'` fixed server-side), `lib/payments.ts:34` (checks amount only).
-- **Status:** Partial.
+- **Files:** `lib/room.ts:24` (`PRICE_PAISE`), `create-order/route.ts` (amount and `'INR'` fixed server-side and written to the ledger row), `app/api/webhooks/razorpay/route.ts` (captured amount and currency compared with the ledger row).
+- **Status:** Partial. The webhook refuses to fulfil when the captured amount or currency differs from the ledger row (tested). Since 2026-10-14 `verify` compares the amount and currency of the payment fetched from Razorpay with the ledger row (tested, PAY-006). No product catalogue; a mismatch is logged, not recorded.
 - **Depends on:** PAY-003.
 - **Acceptance:** Tests: amount mismatch and currency mismatch both refuse fulfilment and record the anomaly.
-- **Evidence:** TEST-004.
+- **Evidence:** TEST-004 — `tests/payment-routes.test.ts` "a captured payment whose amount/currency differs from the ledger grants nothing" (passed locally 2026-10-14, mocked database).
 - **Risks:** —
 
 #### PAY-003 — Persisted order and payment ledger
 - **Requirement:** A `payment_orders` (or similar) table records every order created: internal id, Razorpay order id (unique), owner `clerk_id`, product, context (room/target), amount, currency, status (`created → paid → fulfilled` / `failed` / `fulfilment_failed` / `refunded`), timestamps. Payment events append to an audit table.
 - **Why:** Auditability, reconciliation, ownership checks that do not depend solely on provider-side notes, and recovery.
-- **Files:** none — today purpose lives only in Razorpay order `notes` and successful grants in `reveals`/`chat_extensions`.
-- **Status:** Missing.
+- **Files:** `supabase/migrations/0002_payment_orders.sql`, `0003_fulfilment_failed_and_webhook_events.sql`, `lib/payments.ts` (`recordOrder`, `getOrder`, `settlePayment`, `fulfilOrder`, `recordFailedPayment`, `recordEvent`).
+- **Status:** Partial. **Decision 2026-10-14 (maintainer instruction):** a `payment_orders` table with columns `id`, `user_id`, `room_id`, `order_id`, `payment_id`, `status`, `amount`, `currency`, `created_at`; no payment columns on `users`. `create-order` writes one row per Razorpay order; `verify` and the webhook move it `created → paid` or `failed` (`paid` is final). Gaps against the requirement: no product column (one product today), no `fulfilled` / `refunded` states (`fulfilment_failed` was added 2026-10-14 by migration 0003, PAY-010), no transition timestamps or source, no full audit table of payment events (`webhook_events` records handled webhook events in Paid Mode, not `verify` transitions), no record of the billing mode at creation (FREE-004 continuity path). The migration has not been applied to any database from this repository, and 0003 must be applied with it; tests use a mocked database.
 - **Depends on:** DATA-001 (new migration).
 - **Acceptance:** Every Razorpay order created by the app has exactly one ledger row; every state transition is recorded with a timestamp and source (`verify`, `webhook`, `reconcile`, `admin`).
-- **Evidence:** TEST-004; reconciliation report (PAY-013).
+- **Evidence:** TEST-004 — `tests/payment-routes.test.ts` "records the order in the ledger as created, owned by the caller" and the verify/webhook transition tests (passed locally 2026-10-14, mocked database); reconciliation report (PAY-013) outstanding.
 - **Risks:** —
 
 #### PAY-004 — Authenticated order ownership
 - **Requirement:** Only the user who created an order can verify it; ownership is checked against the ledger.
-- **Files:** `verify/route.ts:19-21` (checks `notes.userId === userId`).
-- **Status:** Implemented — unverified (via notes).
+- **Files:** `verify/route.ts` (ledger row `user_id === userId`; an order with no ledger row is refused).
+- **Status:** Verified (unit, mocked database). Ownership is checked against the ledger since 2026-10-14.
 - **Depends on:** PAY-003.
 - **Acceptance:** Verifying another user's order returns 403 and grants nothing.
-- **Evidence:** TEST-004.
+- **Evidence:** TEST-004 — `tests/payment-routes.test.ts` "refuses another user's order with 403 and grants nothing", "refuses a correctly signed order that is not in the ledger". Passed locally 2026-10-14; not yet run in CI.
 - **Risks:** —
 
 #### PAY-005 — Checkout signature verification
 - **Requirement:** `HMAC_SHA256(order_id|payment_id, key_secret)` compared in constant time.
-- **Files:** `lib/razorpay.ts:23-29`.
-- **Status:** Implemented — unverified.
-- **Depends on:** CFG-002 (secret must exist; today `process.env.RAZORPAY_KEY_SECRET!` would throw if absent).
+- **Files:** `lib/razorpay.ts` (`verifyCheckoutSignature`, constant-time compare).
+- **Status:** Verified (unit).
+- **Depends on:** CFG-002 (a missing secret now verifies nothing instead of throwing).
 - **Acceptance:** Forged, truncated, wrong-order and empty signatures rejected.
-- **Evidence:** TEST-004.
+- **Evidence:** TEST-004 — `tests/payment-routes.test.ts` "returns 400 { verified: false } for …" (forged, wrong secret, different order, truncated, empty, missing fields) and "returns 200 { verified: true } for a correct signature". Passed locally 2026-10-14; not yet run in CI.
 - **Risks:** —
 
 #### PAY-006 — Authoritative payment status
 - **Requirement:** Before marking an order paid, the server fetches the payment from Razorpay and confirms `order_id` matches, `status` is `captured` (or `authorized` with an explicit capture step), and amount/currency match.
-- **Files:** `verify/route.ts` (trusts signature), webhook (trusts event payload + order).
-- **Status:** Missing.
+- **Files:** `verify/route.ts` (after the signature and ownership checks, fetches the payment with `razorpay().payments.fetch`), webhook (trusts the signed event payload, compared with the ledger amount and currency; does not fetch).
+- **Status:** Partial. Since 2026-10-14 `verify` grants only when Razorpay reports the payment `captured`, for the same order id, at the ledger amount and currency. Otherwise it returns 400 `{ verified: false, reason }` with `payment_not_captured` or `amount_mismatch`, or 502 `payment_unconfirmed` when Razorpay cannot be asked. There is no explicit capture step: an `authorized` payment is refused and left for the `payment.captured` webhook. Gaps: the webhook does not fetch the payment; nothing here has been run against Razorpay (mocked SDK).
 - **Depends on:** PAY-003.
 - **Acceptance:** Tests with a mocked provider returning `failed`, `authorized`-then-not-captured, and mismatched order id all refuse fulfilment.
-- **Evidence:** TEST-004.
+- **Evidence:** TEST-004 — `tests/payment-routes.test.ts` "refuses a correctly signed checkout when Razorpay says the payment …" (failed, authorized, created, different order), "refuses a captured payment whose amount/currency differs from the ledger", "grants nothing when the payment cannot be fetched from Razorpay" (passed locally 2026-10-14, mocked SDK and database; `verify` path only).
 - **Risks:** —
 
 #### PAY-007 — Webhook verification on the exact raw body
 - **Requirement:** Signature over the unmodified raw body; reject before parsing; malformed JSON after a valid signature returns 400 and is logged, not a crash.
-- **Files:** `app/api/webhooks/razorpay/route.ts:12-18` (raw body via `req.text()` ✓; `JSON.parse` unguarded).
-- **Status:** Partial.
+- **Files:** `app/api/webhooks/razorpay/route.ts` (raw body via `req.text()`, signature checked before `parseEvent`).
+- **Status:** Verified (unit) for the Paid Mode path. In Free Mode a signed but unparseable body is still acknowledged with 200 and grants nothing (FREE-004).
 - **Depends on:** CFG-002.
 - **Acceptance:** Body re-serialised with different whitespace fails; malformed signed body → 400.
-- **Evidence:** TEST-004.
+- **Evidence:** TEST-004 — `tests/payment-routes.test.ts` "rejects a body that was changed after signing", "returns 400 for a signed body that is not a Razorpay event". Passed locally 2026-10-14; not yet run in CI.
 - **Risks:** —
 
 #### PAY-008 — Idempotent, concurrency-safe processing
 - **Requirement:** Each Razorpay payment id is processed at most once; each webhook event id is recorded; concurrent `verify` + webhook for the same payment produce one fulfilment. Every captured payment ends in a recorded state — never silently discarded.
-- **Files:** `lib/payments.ts:39-47` — reveal upsert uses `onConflict: 'payer_id,target_id', ignoreDuplicates: true`. If two reveal orders for the same pair are paid (e.g. two tabs; `create-order` only checks for an *existing* reveal), the second payment is captured but leaves **no record anywhere**.
-- **Status:** Partial — defect present.
+- **Files:** `lib/payments.ts` (`settlePayment`: an order already `paid` is not written again; the grant is an upsert keyed on `chat_extensions.payment_id`; `hasProcessedEvent`, `recordEvent`), `app/api/webhooks/razorpay/route.ts`, `0003_fulfilment_failed_and_webhook_events.sql` (`webhook_events`).
+- **Status:** Partial. The reveal double-payment defect went with the paid reveal path (2026-10-14). Repeated `verify`, repeated webhook delivery, and `verify` followed by the webhook grant once (tested, mocked database). Since later on 2026-10-14 the webhook records each handled event id with its outcome in `webhook_events` (Paid Mode only) and acknowledges a redelivered id without acting on it (tested). The event is recorded only after handling finishes, so an event that ended in a 5xx is processed again on redelivery. The lookup and the insert are not atomic: two simultaneous deliveries of one event can both be handled, which `settlePayment`'s own idempotency covers. An event with no `x-razorpay-event-id` header is handled but not recorded. Gaps: two different orders for the same room each grant +2 min rather than one becoming `duplicate_purchase`; truly concurrent requests are not tested against a real database (they rely on the `payment_id` unique constraint).
 - **Depends on:** PAY-003.
 - **Acceptance:** Concurrency test: two orders for the same product/context both paid → one fulfilled, the other `duplicate_purchase` and queued for refund; duplicate webhook delivery is a no-op.
-- **Evidence:** TEST-004.
-- **Risks:** Money taken with no record — direct customer harm.
+- **Evidence:** TEST-004 — `tests/payment-routes.test.ts` "replaying a verified payment grants nothing more", "a repeated payment.captured is acknowledged without writing again", "verify followed by the webhook for the same payment grants once", "records each handled event with its id and outcome", "a redelivered event id is skipped before anything is written", "a redelivered payment.failed cannot undo a retry that has since succeeded" (passed locally 2026-10-14, mocked database).
+- **Risks:** A captured payment for an order with no ledger row is only logged.
 
 #### PAY-009 — Event coverage and ordering
 - **Requirement:** Handle `payment.captured`, `payment.failed`, `order.paid`, `refund.processed` (and any others the gates require) in any arrival order; ledger transitions are monotonic.
-- **Files:** webhook handles `payment.captured` only.
-- **Status:** Missing.
+- **Files:** webhook handles `payment.captured` and `payment.failed`; `lib/payments.ts` (`recordFailedPayment`).
+- **Status:** Partial. `payment.failed` marks the order failed; a late `payment.failed` never downgrades a paid order, and a failed attempt can be followed by a successful one on the same order (tested). `order.paid` and `refund.processed` are acknowledged and ignored.
 - **Depends on:** PAY-003.
 - **Acceptance:** Tests deliver events out of order and duplicated; final state is correct.
-- **Evidence:** TEST-004.
+- **Evidence:** TEST-004 — `tests/payment-routes.test.ts` "payment.failed marks the order failed and grants nothing", "a late payment.failed never downgrades a paid order" (passed locally 2026-10-14).
 - **Risks:** —
 
 #### PAY-010 — Recoverable fulfilment
 - **Requirement:** Mark-paid and grant-entitlement happen in one database transaction (Postgres function), or the order is left in `fulfilment_failed` with retry. A webhook must not loop forever on a permanent failure.
 - **Files:** `lib/payments.ts` — an extension for a room with no `rooms` row violates the FK, throws, and the webhook returns 500 indefinitely while the customer has paid. `create-order` checks only the room-id string shape (`partnerFromRoomId`), not that the room exists.
-- **Status:** Missing.
+- **Status:** Partial. Since 2026-10-14 `settlePayment` grants first and marks the order paid second, so a crash between the two writes is repaired by the next delivery. Since later that day `fulfilOrder` treats two failures as permanent — a room id the buyer is not part of, and a missing `rooms` row (Postgres `23503`): the order is left `fulfilment_failed` with the payment id, `[billing] fulfilment_failed …` is logged with ids only, the webhook returns 200 and `verify` returns 409. Any other error is treated as temporary and still returns 5xx so the event is redelivered. A later delivery settles a `fulfilment_failed` order if the cause has gone, and a late `payment.failed` does not overwrite it. Gaps: no transaction (grant and mark-paid are still two writes); the alert is only a log line (OPS-003 missing); no refund queue (PAY-012); `create-order` still does not check that the room exists; migration 0003 is not applied to any database; mocked database only.
 - **Depends on:** PAY-003.
 - **Acceptance:** Forced fulfilment failure leaves a `fulfilment_failed` row, an alert (OPS-003), and returns 200 to the provider after recording.
-- **Evidence:** TEST-004.
+- **Evidence:** TEST-004 — `tests/payment-routes.test.ts` "a captured payment for a room that no longer exists is recorded as fulfilment_failed and acknowledged", "… for a room the buyer is not in …", "a temporary database error returns 500 and the redelivery of the same event then fulfils", "an order left fulfilment_failed is settled by a later event once the cause is gone", "a late payment.failed never overwrites a fulfilment_failed order", and the `verify` case returning 409 (passed locally 2026-10-14, mocked database). No alert evidence.
 - **Risks:** —
 
 #### PAY-011 — Preconditions re-checked at fulfilment
@@ -575,7 +577,7 @@ Everything in this section is **inactive until Paid Mode is effective** (CFG-002
 
 #### PAY-014 — The client never grants
 - **Requirement:** The UI shows an entitlement only from a server response; a redirect, `razorpay_payment_id`, or client store value grants nothing.
-- **Files:** `hooks/useRazorpay.ts` (waits for `verify`), `store/useAppStore.ts` (stores server-returned values), `ChatRoom.tsx:143-154`.
+- **Files:** `hooks/useRazorpay.ts` (`openCheckout` resolves `verified: true` only after `verify`), `components/chat/ChatRoom.tsx` (`startPayment` re-reads room state from the server).
 - **Status:** Implemented — unverified.
 - **Depends on:** —
 - **Acceptance:** Calling `verify` with a fabricated payment id and signature grants nothing; refreshing the page derives state from the server only.
@@ -585,15 +587,15 @@ Everything in this section is **inactive until Paid Mode is effective** (CFG-002
 #### PAY-015 — Replay and cross-user manipulation
 - **Requirement:** A payment id/signature pair from user A cannot be replayed by user B or re-used for another order or product.
 - **Files:** `verify/route.ts`.
-- **Status:** Partial — ownership check prevents cross-user; ledger state (PAY-003) needed to prevent re-use.
+- **Status:** Verified (unit, mocked database). The ledger owner check stops cross-user replay, the ledger `paid` state stops re-use, and the signature binds a payment to one order.
 - **Depends on:** PAY-003, PAY-008.
 - **Acceptance:** Replay tests in TEST-004.
-- **Evidence:** TEST-004.
+- **Evidence:** TEST-004 — `tests/payment-routes.test.ts` "refuses another user's order with 403", "replaying a verified payment grants nothing more", "returns 400 … for a signature for a different order". Passed locally 2026-10-14; not yet run in CI.
 - **Risks:** —
 
 #### PAY-016 — Pre-checkout disclosure
 - **Requirement:** Before checkout, show the product, price, what exactly is delivered, the refund policy, and links to Terms/Privacy.
-- **Files:** `RevealModal.tsx` (shows "Permanent unlock", a fabricated example identity, no refund terms), `ExtendModal.tsx`.
+- **Files:** `ExtendModal.tsx` (`RevealModal.tsx`, with its fabricated example identity, was removed 2026-10-14).
 - **Status:** Partial.
 - **Depends on:** GATE-004, DEC-007.
 - **Acceptance:** Disclosure copy reviewed against GATE-004 policies.
@@ -652,8 +654,8 @@ Razorpay onboarding and product eligibility are **unresolved**. The ability to c
 
 #### SEC-004 — Input validation
 - **Requirement:** All route inputs validated for type and size; IDs validated for format before use.
-- **Files:** route handlers (ad-hoc casts like `as Record<string,string>`).
-- **Status:** Partial.
+- **Files:** route handlers (ad-hoc casts like `as Record<string,string>`); `app/(main)/dashboard/actions.ts` (`completeOnboarding`).
+- **Status:** Partial. `completeOnboarding` stores `branch` and `collegeYear` trimmed but with no length cap or allow-list, and `vibeTag` as free text up to 50 characters, although the UI offers fixed choices; all three are shown to every signed-in user.
 - **Depends on:** —
 - **Acceptance:** Malformed-input tests return 400, never 500.
 - **Evidence:** TEST-003.
@@ -662,7 +664,7 @@ Razorpay onboarding and product eligibility are **unresolved**. The ability to c
 #### PRIV-001 — Real name and email private by default
 - **Requirement:** `real_name` and `email` are never returned to anyone except the user themself, and to another participant only via ID-001 consent.
 - **Files:** `lib/server.ts:7`, migration `users` policy, `getRevealed` (`lib/server.ts:88-105`).
-- **Status:** **Conflicts** — `getRevealed` returns the target's real name and email to anyone with a `reveals` row, and `reveals` rows are created by payment alone.
+- **Status:** **Conflicts** — `getRevealed` returns the target's real name and email to anyone with a `reveals` row, and `reveals` rows were created by payment alone. Since 2026-10-14 no code creates `reveals` rows (paid reveal purchase path removed), but existing rows are still displayed pending DEC-003. The 2026-10-14 merge of `origin/main` did not accept an incoming change that added `instagram_handle` to what `getRevealed` returns; it still returns `real_name` and `email` only (`tests/campus-privacy.test.ts`).
 - **Depends on:** ID-001.
 - **Acceptance:** Test: user B's `real_name`/`email` never appear in any response to user A unless B consented to share with A.
 - **Evidence:** TEST-003.
@@ -729,11 +731,11 @@ Razorpay onboarding and product eligibility are **unresolved**. The ability to c
 
 #### ID-002 — Consent independent of payment
 - **Requirement:** No payment, entitlement, or webhook can create, imply or substitute for consent. Per DEC-002 there is no paid identity product; introducing one would require a new owner decision recorded here, and it could never itself disclose without consent.
-- **Files:** `lib/payments.ts` reveal branch.
-- **Status:** **Conflicts.**
+- **Files:** `lib/payments.ts`, `create-order/route.ts`, `verify/route.ts` (reveal branches removed 2026-10-14).
+- **Status:** Verified (unit). No payment path creates a `reveals` row or returns identity: `create-order` refuses `type: 'reveal'`, and `verify` returns only `{ verified }`. Identities from pre-existing `reveals` rows are a PRIV-001 / DEC-003 matter.
 - **Depends on:** DEC-002.
 - **Acceptance:** Test: completed payment with no consent → no identity in any response.
-- **Evidence:** TEST-004.
+- **Evidence:** TEST-004 — `tests/payment-routes.test.ts` "refuses the withdrawn identity reveal product (DEC-002)", "returns 200 { verified: true } for a correct signature…"; `tests/smoke/free-mode.test.ts` Paid Mode control (no reveal offer rendered). Passed locally 2026-10-14; not yet run in CI.
 - **Risks:** —
 
 #### ID-003 — Informed, scoped, revocable consent
@@ -795,8 +797,8 @@ Razorpay onboarding and product eligibility are **unresolved**. The ability to c
 
 #### DATA-001 — Migrations are the only schema source
 - **Requirement:** Schema changes are new numbered files in `supabase/migrations/`; applied migrations are never edited; migrations are applied with a tool that records versions (e.g. Supabase CLI), not by pasting into the SQL editor.
-- **Files:** `supabase/migrations/0001_init.sql`; README setup steps.
-- **Status:** Partial.
+- **Files:** `supabase/migrations/0001_init.sql`, `0002_payment_orders.sql`, `0003_fulfilment_failed_and_webhook_events.sql` (both 2026-10-14), `0004_campus_branch.sql`, `0005_campus_vibe_outfit_instagram.sql` (merged 2026-10-14); README setup steps.
+- **Status:** Partial. The two campus migrations arrived from `origin/main` numbered 0002 and 0003, colliding with the payment migrations; the merge renumbered them to 0004 and 0005 with their SQL unchanged (`add column if not exists`, so re-running them is harmless). Whether they were already pasted into a live database under the old names is *Information Required*. The README setup steps do not mention them yet, and the server tolerates their absence by retrying with fewer columns.
 - **Depends on:** DEP-002.
 - **Acceptance:** Fresh local database built only from migrations matches production schema diff = empty.
 - **Evidence:** Schema diff output.
@@ -804,7 +806,7 @@ Razorpay onboarding and product eligibility are **unresolved**. The ability to c
 
 #### DATA-002 — Entitlement uniqueness and linkage
 - **Requirement:** Every entitlement row references exactly one ledger row (PAY-003); one ledger row yields at most one entitlement; uniqueness constraints enforce it in the database.
-- **Files:** `reveals.payment_id unique`, `chat_extensions.payment_id unique` ✓; no cross-table or ledger linkage.
+- **Files:** `reveals.payment_id unique`, `chat_extensions.payment_id unique` ✓; no cross-table linkage: `chat_extensions` and `payment_orders` share a `payment_id` value but no foreign key.
 - **Status:** Partial.
 - **Depends on:** PAY-003.
 - **Acceptance:** Constraint tests: duplicate insert fails at the database.
@@ -878,7 +880,7 @@ At baseline there was **no test framework, no test file and no CI**. Vitest was 
 | **TEST-001** | Test runner + `npm test` script | Partial — Vitest, `npm test`, `npm run test:smoke` pass locally; CI workflow defined but not yet run on GitHub | Exists and runs in CI |
 | **TEST-002** | Billing-mode resolution and readiness (CFG-001/002/003) | Implemented — `tests/billing.test.ts`, passing locally; not in CI | 100% of the specified input table |
 | **TEST-003** | Authorization/IDOR/route table: every API route × {unauthenticated, participant, non-participant, blocked}; consent; timer; rate limits | Missing | Every route listed; all cases pass |
-| **TEST-004** | Payments: forged/missing signature, foreign order, replay, amount/currency mismatch, payment status not captured, duplicate verify+webhook, duplicate/out-of-order webhooks, fulfilment failure, refund, Free Mode rejection; **unverified payments grant nothing** | Partial — Free Mode / not-ready rejection only (`tests/payment-routes.test.ts`) | All pass; required before any Paid Mode work merges |
+| **TEST-004** | Payments: forged/missing signature, foreign order, replay, amount/currency mismatch, payment status not captured, duplicate verify+webhook, duplicate/out-of-order webhooks, fulfilment failure, refund, Free Mode rejection; **unverified payments grant nothing** | Partial — `tests/payment-routes.test.ts` (Razorpay SDK and database mocked; passing locally 2026-10-14, not in CI): Free Mode / not-ready rejection; forged, truncated, wrong-order, empty and missing signatures; foreign and unknown orders; replay; webhook amount/currency mismatch; duplicate verify + webhook; duplicate and out-of-order webhooks. Not covered: payment status not captured (PAY-006), fulfilment failure (PAY-010), refund (PAY-012), a real database or Razorpay test mode | All pass; required before any Paid Mode work merges |
 | **TEST-005** | RLS + Realtime channel policies against local Supabase | Missing | All pass |
 | **TEST-006** | CI on every PR: `typecheck`, `lint`, tests, `next build` with no Razorpay env, client-bundle secret scan | Implemented — unverified. `.github/workflows/ci.yml` runs on pull requests and pushes to `main`, Node 22, no credentials. Every step passed in a clean-worktree CI simulation 2026-10-13 (fresh `npm ci`, no `.env`, no provider variables). Not yet executed on GitHub Actions; not yet a required check (repository setting). | Required check on `main` |
 | **TEST-007** | Free Mode smoke: no `RAZORPAY_*`, no `BILLING_MODE`; sign-up → onboarding → discovery → chat → expiry; asserts no payment UI/requests | Partial — `tests/smoke/free-mode.test.ts` (TEST-007, in-process, providers mocked; not a browser or provider test) covers default mode, chat render (open and expired), payment creation, checkout verification and signed webhook, with no provider or network access. Not covered: browser execution and clicks, sign-up, onboarding, discovery, landing page (todo, blocked on DEC-008), real providers. | Passes on every PR touching app code |
@@ -930,9 +932,9 @@ A phase is complete only when its exit criteria have **evidence**; planning or d
 | ID | Risk | Severity | Objective |
 |---|---|---|---|
 | **R-1** | Paying ₹29 discloses another user's real name and email without their consent, while onboarding promises the name stays private. | Critical | PRIV-001, ID-001, ID-002, PRIV-006 |
-| **R-2** | A second paid reveal for the same pair is captured but leaves no record (`ignoreDuplicates`). | High | PAY-008 |
+| **R-2** | A second paid reveal for the same pair is captured but leaves no record (`ignoreDuplicates`). *Resolved 2026-10-14: the paid reveal path is removed.* | High | PAY-008 |
 | **R-3** | Fulfilment failure (e.g. extension for a room with no row) leaves a paid customer unfulfilled with the webhook retrying indefinitely. | High | PAY-010 |
-| **R-4** | No payment ledger: no audit trail, no reconciliation, no failed/refunded state. | High | PAY-003, PAY-013 |
+| **R-4** | No payment ledger: no audit trail, no reconciliation, no failed/refunded state. *Partly mitigated 2026-10-14: `payment_orders` records created/paid/failed; still no event audit trail, reconciliation or refunded state.* | High | PAY-003, PAY-013 |
 | **R-5** | No block, report, age gate or rate limit in a stranger-chat product. | High | SAFE-001…004, CHAT-007 |
 | **R-6** | Public Realtime presence channels leak online Clerk ids and allow presence spoofing. | Medium | PRIV-005 |
 | **R-7** | The 2-minute limit can be sidestepped by never being co-present; unlimited one-sided messages. | Medium | CHAT-003, CHAT-004 |
@@ -948,9 +950,9 @@ Known limitations of the Free Mode gate, tracked here so they are not mistaken f
 
 | ID | Issue | Priority | Resolution required | Objectives |
 |---|---|---|---|---|
-| **FU-001** | **Webhook event loss.** In any non-paid state a correctly signed webhook is acknowledged with 200 and only logged, not persisted, so Razorpay will not retry it. A genuine payment from an earlier Paid Mode period that needs fulfilment after a rollback could be missed; until a ledger exists the only trace is the server log line (subject to the host's log retention). | Highest | Durable payment ledger (PAY-003), persisted webhook events, and reconciliation against Razorpay (PAY-013) that can recover missed events, all before any paid transaction is accepted. The Paid Mode rollback rehearsal (OPS-005) must show no lost payment. | FREE-004, PAY-003, PAY-013, OPS-005 |
+| **FU-001** | **Webhook event loss.** In any non-paid state a correctly signed webhook is acknowledged with 200 and only logged, not persisted, so Razorpay will not retry it. A genuine payment from an earlier Paid Mode period that needs fulfilment after a rollback could be missed; until a ledger exists the only trace is the server log line (subject to the host's log retention). | Highest | Durable payment ledger (PAY-003), persisted webhook events, and reconciliation against Razorpay (PAY-013) that can recover missed events, all before any paid transaction is accepted. The Paid Mode rollback rehearsal (OPS-005) must show no lost payment. *Progress 2026-10-14, still open:* the ledger exists (PAY-003) and webhook events handled in Paid Mode are persisted in `webhook_events` (PAY-008); an event received while billing is off is still only logged, and there is no reconciliation or rehearsal. | FREE-004, PAY-003, PAY-008, PAY-013, OPS-005 |
 | **FU-002** | **Environment detection.** The live-key rule uses `NODE_ENV === 'production'`, which is also true for preview deployments, so a preview could accept `rzp_live_` keys. | High | An explicit, trusted deployment-environment signal (e.g. a platform-set variable, once hosting is confirmed) that allows live keys only on the production deployment, with tests. | CFG-002, DEP-001 |
-| **FU-003** | **Identity disclosure.** The paid reveal path still exists (reachable only in a fully configured Paid Mode), and identities from existing `reveals` rows are still displayed, including in Free Mode. Both conflict with DEC-002. | High | Remove the paid reveal path. Separately, first establish whether any live Razorpay payments were ever taken, then decide DEC-003 and handle historical records (stop display; refunds if needed). Do not delete records before that decision. | PRIV-001, ID-002, DEC-003 |
+| **FU-003** | **Identity disclosure.** *Done 2026-10-14:* the paid reveal purchase path is removed (button, `RevealModal`, `reveal` payment type, route and hook handling). *Still open:* identities from existing `reveals` rows are still displayed (`getRevealed`, `RevealCard`), including in Free Mode, which conflicts with DEC-002. *2026-10-14 merge of `origin/main`:* incoming work assumed the paid reveal still exists ("unlock for ₹29" copy in the dashboard and onboarding, Instagram handle added to the reveal). DEC-002 stands, so that copy was replaced with the existing "Paying never unlocks them" wording and the `getRevealed` change was not accepted; the collaborators need to be told. | High | Remove the paid reveal path. Separately, first establish whether any live Razorpay payments were ever taken, then decide DEC-003 and handle historical records (stop display; refunds if needed). Do not delete records before that decision. | PRIV-001, ID-002, DEC-003 |
 
 ### Decisions required
 
@@ -958,7 +960,7 @@ Known limitations of the Free Mode gate, tracked here so they are not mistaken f
 |---|---|---|
 | **DEC-001** | Free Mode chat expiry | **Decided 2026-10-13 (project owner):** free mutual extension, both must agree, +2 min (FREE-005). Still open: cap on free extensions per room; whether "both present" stays a timer-start condition (CHAT-003). |
 | **DEC-002** | Identity-sharing model | **Decided 2026-10-13 (project owner):** free, mutual, opt-in, field-level choice; never paid (FREE-006, ID-004). The paid "reveal" product is withdrawn. |
-| **DEC-003** | Treatment of existing `reveals` rows created without consent | Recommendation: stop displaying them; establish whether any **live** payments exist (*Information Required*) and refund if so |
+| **DEC-003** | Treatment of existing `reveals` rows created without consent | Recommendation: stop displaying them; establish whether any **live** payments exist (*Information Required*) and refund if so. 2026-10-14 (maintainer instruction): the purchase path was removed, and the display code and the `reveals` table were deliberately left untouched until this is decided. |
 | **DEC-004** | Extension rules: who may buy, before/after timer start, how many, does the partner need to agree | Currently: either participant, any time, unlimited, no partner consent |
 | **DEC-005** | Age policy | **Decided 2026-10-13 (project owner):** 18+ only, self-declaration at onboarding, no date of birth collected (SAFE-003). Subject to GATE-008 confirmation. |
 | **DEC-006** | Retention periods for messages, profiles and reports after the season | — |
@@ -977,8 +979,8 @@ Known limitations of the Free Mode gate, tracked here so they are not mistaken f
 
 ### Technical debt
 
-- `process.env.X!` non-null assertions for Supabase/Razorpay config (CFG-002, CFG-005).
-- Ad-hoc request-body casts instead of validation (SEC-004).
+- `process.env.X!` non-null assertions for Supabase config (CFG-005). Removed from `lib/razorpay.ts` 2026-10-14.
+- Ad-hoc request-body casts instead of validation (SEC-004). The three billing routes narrow the body without casts since 2026-10-14; other routes still cast.
 - `read_by[]` read-modify-write (CHAT-006).
 - `PRICE_PAISE` lives in `lib/room.ts` (a client-importable module) — fine for display, but the authoritative catalogue must be server-side (PAY-002).
 
@@ -1010,8 +1012,8 @@ Status abbreviations: **V** Verified (scope in brackets, e.g. unit/route level) 
 | FREE-008 | Config ≠ approval | process | M | change record | Adopt §20 | GATE-* |
 | AUTH-001 | Auth on all surfaces | `middleware.ts`, `requireUserId` | IU | TEST-003 | Route-table test | — |
 | ONB-001 | Generated nicknames | `displayNames.ts`, `actions.ts` | IU | unit test | Write tests | — |
-| ONB-002 | Data minimisation | `actions.ts:30-45`, `OnboardingModal.tsx:29-32` | C | review | Remove unused collection | DEC-002 |
-| DISC-001 | Public fields, filtered | `api/users/route.ts` | P | TEST-003 | Add block/opt-out filter | SAFE-001, DEC-009 |
+| ONB-002 | Data minimisation | `actions.ts` (`completeOnboarding`), `OnboardingModal.tsx` | C | review | Remove unused collection; decide `instagram_handle` | DEC-002 |
+| DISC-001 | Public fields, filtered | `api/users/route.ts` | P | TEST-003; `tests/campus-privacy.test.ts` (private fields never selected) | Add block/opt-out filter; approve campus fields | SAFE-001, DEC-009 |
 | DISC-002 | Presence integrity | `useLobbyPresence.ts` | P | TEST-005 | See PRIV-005 | PRIV-005 |
 | CHAT-001 | 1:1 room access | `lib/room.ts`, `loadRoom` | IU | TEST-003 | Write tests | — |
 | CHAT-002 | Message integrity | `messages/route.ts`, RLS | IU | TEST-005 | Write tests | — |
@@ -1021,21 +1023,21 @@ Status abbreviations: **V** Verified (scope in brackets, e.g. unit/route level) 
 | CHAT-006 | Read receipts consistent | `read/route.ts` | P | review | Atomic append | — |
 | CHAT-007 | Rate limiting | — | M | TEST-003 | Choose mechanism | — |
 | PAY-001 | Mode-gated billing | payment routes, `ChatRoom.tsx` | P | `tests/payment-routes.test.ts` | Landing copy | FREE-003 |
-| PAY-002 | Server catalogue, amount+currency | `lib/room.ts:24`, `payments.ts:34` | P | TEST-004 | Add currency check, catalogue | PAY-003 |
-| PAY-003 | Order/payment ledger | — | M | TEST-004 | New migration | DATA-001 |
-| PAY-004 | Order ownership | `verify/route.ts:19-21` | IU | TEST-004 | Move to ledger | PAY-003 |
-| PAY-005 | Checkout signature | `lib/razorpay.ts:23-29` | IU | TEST-004 | Write tests | CFG-002 |
-| PAY-006 | Authoritative payment status | — | M | TEST-004 | Fetch payment | PAY-003 |
-| PAY-007 | Raw-body webhook | `webhooks/razorpay/route.ts` | P | TEST-004 (bad signature rejected) | Guard parse on the paid path | — |
-| PAY-008 | Idempotency/concurrency | `payments.ts:39-47` | P (defect) | TEST-004 | Ledger + state machine | PAY-003 |
-| PAY-009 | Event coverage/ordering | webhook | M | TEST-004 | Handle events | PAY-003 |
-| PAY-010 | Recoverable fulfilment | `payments.ts` | M | TEST-004 | Transactional fn | PAY-003 |
+| PAY-002 | Server catalogue, amount+currency | `lib/room.ts:24`, `create-order`, `verify`, webhook | P | `tests/payment-routes.test.ts` (webhook and verify mismatch) | Catalogue; record anomalies | PAY-003 |
+| PAY-003 | Order/payment ledger | `0002_payment_orders.sql`, `0003_…webhook_events.sql`, `lib/payments.ts` | P | `tests/payment-routes.test.ts` | `fulfilled`/`refunded` states, full audit table, apply migrations | DATA-001 |
+| PAY-004 | Order ownership | `verify/route.ts` (ledger) | V (unit) | `tests/payment-routes.test.ts` | Run in CI | PAY-003 |
+| PAY-005 | Checkout signature | `lib/razorpay.ts` | V (unit) | `tests/payment-routes.test.ts` | Run in CI | CFG-002 |
+| PAY-006 | Authoritative payment status | `verify/route.ts` | P | `tests/payment-routes.test.ts` | Fetch in the webhook too; run against Razorpay test mode | PAY-003 |
+| PAY-007 | Raw-body webhook | `webhooks/razorpay/route.ts` | V (unit, paid path) | `tests/payment-routes.test.ts` | Run in CI | — |
+| PAY-008 | Idempotency/concurrency | `lib/payments.ts` (`settlePayment`, `recordEvent`), webhook, `webhook_events` | P | `tests/payment-routes.test.ts` | `duplicate_purchase`; atomic event claim; real-database concurrency test | PAY-003 |
+| PAY-009 | Event coverage/ordering | webhook | P | `tests/payment-routes.test.ts` | `order.paid`, `refund.processed` | PAY-003 |
+| PAY-010 | Recoverable fulfilment | `lib/payments.ts` (`fulfilOrder`), `0003_…webhook_events.sql` | P | `tests/payment-routes.test.ts` | Transactional fn; alert (OPS-003); refund queue | PAY-003 |
 | PAY-011 | Preconditions at fulfilment | `payments.ts` | M | TEST-004 | Re-check | SAFE-001, ID-001 |
 | PAY-012 | Refunds | — | M | TEST-004 | Policy + handling | DEC-007 |
 | PAY-013 | Reconciliation | — | M | report | Script | PAY-003 |
-| PAY-014 | Client never grants | `useRazorpay.ts`, store | IU | TEST-004 | Write tests | — |
-| PAY-015 | Replay protection | `verify/route.ts` | P | TEST-004 | Ledger state | PAY-003 |
-| PAY-016 | Pre-checkout disclosure | `RevealModal.tsx`, `ExtendModal.tsx` | P | review | Rewrite copy | GATE-004 |
+| PAY-014 | Client never grants | `useRazorpay.ts`, `ChatRoom.tsx` | IU | TEST-004 | Write tests | — |
+| PAY-015 | Replay protection | `verify/route.ts`, ledger | V (unit) | `tests/payment-routes.test.ts` | Run in CI | PAY-003 |
+| PAY-016 | Pre-checkout disclosure | `ExtendModal.tsx` | P | review | Rewrite copy | GATE-004 |
 | GATE-001…003 | Razorpay eligibility, KYC, use case | external | IR | written confirmation | Contact Razorpay | — |
 | GATE-004 | Policies published | — | M | live URLs | Draft policies | DEC-007, GATE-008 |
 | GATE-005 | Live creds/webhook config | external | IR | env audit | — | GATE-002 |
@@ -1045,22 +1047,22 @@ Status abbreviations: **V** Verified (scope in brackets, e.g. unit/route level) 
 | SEC-001 | Secrets server-side | `lib/*` `server-only` | IU | bundle-name scan step in CI workflow; clean in local simulation (Clerk SDK's own `CLERK_SECRET_KEY` lookup excluded) | Run on GitHub | TEST-006 |
 | SEC-002 | AuthZ before service role | all `supabaseAdmin()` callers | IU | TEST-003 | Write tests | — |
 | SEC-003 | RLS correct | migration | IU | TEST-005 | Local Supabase tests | IR: live config |
-| SEC-004 | Input validation | route handlers | P | TEST-003 | Validate inputs | — |
-| PRIV-001 | Name/email private | `lib/server.ts:88-105` | **C** | TEST-003 | Remove payer-only disclosure | DEC-002/003 |
+| SEC-004 | Input validation | route handlers, `actions.ts` | P | TEST-003 | Validate inputs; allow-list `branch`/`collegeYear`/`vibeTag` | — |
+| PRIV-001 | Name/email private | `lib/server.ts` (`getRevealed`) | **C** | TEST-003; `tests/campus-privacy.test.ts` (no `instagram_handle` via `reveals`) | Stop displaying existing `reveals` rows | DEC-003 |
 | PRIV-002 | No IDOR | `room.ts`, routes | IU | TEST-003/004 | Write tests | — |
 | PRIV-003 | No PII in logs | `lib/server.ts:23` | P | review | Sanitise | OPS-001 |
 | PRIV-004 | Deletion/retention | — | M | integration test | Design | DEC-006 |
 | PRIV-005 | Private Realtime channels | `useLobbyPresence.ts`, `useSupabaseRealtime.ts` | P | TEST-005 | Private channels + policy | DATA-001 |
 | PRIV-006 | Truthful claims | landing, onboarding, README | **C** | review | Fix copy | DEC-002/008 |
 | ID-001 | Consent before disclosure | — | **C** | TEST-003 | Build consent model | DEC-002 |
-| ID-002 | Consent ≠ payment | `payments.ts` | **C** | TEST-004 | Remove paid reveal | DEC-002 |
+| ID-002 | Consent ≠ payment | payment routes, `lib/payments.ts` | V (unit) | `tests/payment-routes.test.ts`, smoke | Run in CI | DEC-002 |
 | ID-003 | Informed, scoped, revocable | — | M | review | Design | DEC-002 |
 | ID-004 | Mutual, field-level opt-in exchange | — | M | TEST-003 | Design data model + flow | ID-001, DATA-001, DEC-003 |
 | SAFE-001 | Blocking | — | M | TEST-003 | Build | DATA-001 |
 | SAFE-002 | Reporting | — | M | test + runbook | Build | DATA-001 |
 | SAFE-003 | 18+ self-declaration at onboarding | `OnboardingModal.tsx`, `actions.ts` | M | TEST-003, TEST-007 | Build | DATA-001; GATE-008 |
 | SAFE-004 | Abuse prevention | — | M | refs | — | CHAT-004/007 |
-| DATA-001 | Migrations only | `supabase/migrations/` | P | schema diff | Adopt CLI | IR: live DB |
+| DATA-001 | Migrations only | `supabase/migrations/` (0001–0005) | P | schema diff | Adopt CLI; add 0004/0005 to README setup | IR: live DB |
 | DATA-002 | Entitlement linkage | migration | P | TEST-005 | With PAY-003 | PAY-003 |
 | DATA-003 | User referential integrity | migration | P | integration | With PRIV-004 | PRIV-004 |
 | DATA-004 | Timer monotonic | `timer/route.ts:21` | IU | TEST-003 | Write test | — |
@@ -1069,7 +1071,7 @@ Status abbreviations: **V** Verified (scope in brackets, e.g. unit/route level) 
 | OPS-001…006 | Ops | see §13 | M/P | see §13 | see §13 | — |
 | TEST-001 | Test runner | `vitest.config.ts`, `tests/` | P | `npm test` local + CI simulation | Run CI on GitHub | TEST-006 |
 | TEST-002 | Billing config tests | `tests/billing.test.ts` | IU (passing locally) | local run | Run in CI | TEST-006 |
-| TEST-004 | Payment tests | `tests/payment-routes.test.ts` | P (Free Mode subset) | local run | Full matrix in Phase 2 | PAY-003 |
+| TEST-004 | Payment tests | `tests/payment-routes.test.ts` | P | local run | PAY-006, PAY-010, PAY-012 cases; real database | PAY-003 |
 | TEST-006 | CI | `.github/workflows/ci.yml` | IU | local clean-worktree simulation | First GitHub run; make required check on `main` | push (owner) |
 | TEST-007 | Free Mode smoke | `tests/smoke/free-mode.test.ts` | P (in-process, mocked) | `npm run test:smoke` | Browser-level flow incl. sign-up/onboarding/discovery | test Clerk/Supabase projects or browser tooling |
 | TEST-003, TEST-005 | Testing | — | M | — | Phase 0/1 | — |

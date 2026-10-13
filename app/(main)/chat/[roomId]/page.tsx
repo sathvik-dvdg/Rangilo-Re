@@ -1,12 +1,14 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { auth } from '@clerk/nextjs/server';
-import { getBillingStatus } from '@/lib/billing';
+import { isBillingEnabled } from '@/lib/billing';
 import { getClerkConfigProblems } from '@/lib/clerkConfig';
 import { ChatRoom } from '@/components/chat/ChatRoom';
 import { HttpError, getRoomState } from '@/lib/server';
 import { buttonVariants } from '@/components/ui/button';
 import { Diya } from '@/components/chat/TimerExpiredOverlay';
+import { diagnoseDbError } from '@/lib/dbDiagnosis';
+import { BackendProblem } from '@/components/layout/BackendProblem';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,9 +21,17 @@ export default async function ChatPage({ params }: { params: { roomId: string } 
   try {
     const state = await getRoomState(decodeURIComponent(params.roomId), userId);
     // Only hides or shows payment UI; the billing routes enforce the mode themselves.
-    return <ChatRoom key={state.roomId} initial={state} billingEnabled={getBillingStatus().mode === 'paid'} renderedAt={Date.now()} />;
+    return <ChatRoom key={state.roomId} initial={state} billingEnabled={isBillingEnabled()} renderedAt={Date.now()} />;
   } catch (e) {
     if (e instanceof HttpError && e.status === 409) redirect('/dashboard');
+    if (!(e instanceof HttpError)) {
+      const diagnosis = diagnoseDbError(e);
+      if (diagnosis) {
+        console.error('[chat]', diagnosis.title, diagnosis.detail ?? '');
+        return <BackendProblem diagnosis={diagnosis} />;
+      }
+      console.error('[chat]', e);
+    }
     const message = e instanceof HttpError ? e.message : 'Could not open this chat';
     return (
       <main className="grain bandhani flex min-h-[100dvh] flex-col items-center justify-center gap-4 px-6 text-center">

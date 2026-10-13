@@ -10,7 +10,6 @@ import { ChatTimer } from './ChatTimer';
 import { MessageBubble } from './MessageBubble';
 import { RevealCard } from './RevealCard';
 import { TimerExpiredOverlay } from './TimerExpiredOverlay';
-import { RevealModal } from '@/components/modals/RevealModal';
 import { ExtendModal } from '@/components/modals/ExtendModal';
 import { Toast } from '@/components/ui/Toast';
 import { useRoomRealtime } from '@/hooks/useSupabaseRealtime';
@@ -19,6 +18,7 @@ import { useRazorpay } from '@/hooks/useRazorpay';
 import { useAppStore } from '@/store/useAppStore';
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { fireCelebration } from '@/lib/confetti';
 import type { Message, RoomState } from '@/lib/types';
 
 export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: RoomState; billingEnabled: boolean; renderedAt?: number }) {
@@ -29,17 +29,20 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
   const storedReveal = useAppStore((s) => s.revealed[partner.clerk_id]);
   const setRevealedInStore = useAppStore((s) => s.setRevealed);
   const revealed = storedReveal ?? initial.revealed;
+  const isUnlocked = Boolean(revealed);
 
   const [text, setText] = useState('');
-  const [sheet, setSheet] = useState<'reveal' | 'extend' | null>(null);
+  const [sheet, setSheet] = useState<'extend' | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const { pay, busy, error: payError, clearError } = useRazorpay();
 
   const timer = useChatTimer(timerStartedAt, extraSeconds, renderedAt);
+  // If the profile is unlocked for ₹29, chat has no time limit!
+  const isExpired = isUnlocked ? false : timer.expired;
   // Free Mode has no extension, so a closed chat stays readable instead of blurring behind an overlay.
-  const closedFree = timer.expired && !billingEnabled;
+  const closedFree = isExpired && !billingEnabled;
 
   const refresh = useCallback(async () => {
     const res = await fetch(`/api/rooms/${encodeURIComponent(roomId)}`);
@@ -68,7 +71,10 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
     onMessage: upsert,
     onMessageUpdate: upsert,
     onTimerStart: setTimerStartedAt,
-    onExtension: () => void refresh(),
+    onExtension: () => {
+      void refresh();
+      fireCelebration();
+    },
   });
 
   // Start the clock once both have spoken and both are in the room.
@@ -76,14 +82,20 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
   const bothSpoke =
     messages.some((m) => m.sender_id === me.clerk_id && !m.pending) && messages.some((m) => m.sender_id === partner.clerk_id);
   const startRequested = useRef(false);
+  const [startRetry, setStartRetry] = useState(0);
   useEffect(() => {
     if (timerStartedAt || startRequested.current || !partnerHere || !bothSpoke) return;
     startRequested.current = true;
+    // If the server isn't ready yet (e.g. 409 while a message is still committing), retry shortly.
+    const retryLater = () => {
+      startRequested.current = false;
+      window.setTimeout(() => setStartRetry((n) => n + 1), 2000);
+    };
     fetch(`/api/rooms/${encodeURIComponent(roomId)}/timer`, { method: 'POST' })
       .then((r) => r.json())
-      .then((d) => d.timerStartedAt && setTimerStartedAt(d.timerStartedAt))
-      .catch(() => (startRequested.current = false));
-  }, [timerStartedAt, partnerHere, bothSpoke, roomId]);
+      .then((d) => (d.timerStartedAt ? setTimerStartedAt(d.timerStartedAt) : retryLater()))
+      .catch(retryLater);
+  }, [timerStartedAt, partnerHere, bothSpoke, roomId, startRetry]);
 
   // Read receipts: mark partner's messages read while the tab is visible.
   const unread = messages.some((m) => m.sender_id === partner.clerk_id && !m.read_by?.includes(me.clerk_id));
@@ -109,7 +121,7 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
   const send = async (e: React.FormEvent) => {
     e.preventDefault();
     const body = text.trim();
-    if (!body || timer.expired) return;
+    if (!body || isExpired) return;
     setText('');
     setSendError(null);
     const temp: Message = {
@@ -143,23 +155,18 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
     });
   };
 
-  const startPayment = async (type: 'reveal' | 'extend') => {
+  const startPayment = async () => {
     if (!billingEnabled) return;
-    const result = await pay(type, { targetUserId: partner.clerk_id, roomId });
-    if (!result) return;
+    if (!(await pay(roomId))) return;
     setSheet(null);
-    if (result.type === 'reveal') {
-      setRevealedInStore(partner.clerk_id, result.identity);
-      setToast('Identity unlocked');
-    } else {
-      await refresh();
-      setToast('+2 minutes added');
-    }
+    await refresh();
+    fireCelebration();
+    setToast('🎉 Unlimited chat & real identity unlocked!');
   };
 
-  const openSheet = (s: 'reveal' | 'extend') => {
+  const openSheet = () => {
     clearError();
-    setSheet(s);
+    setSheet('extend');
   };
 
   const waitingFor = !timer.started
@@ -217,18 +224,13 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
               )}
             </div>
           </div>
-          {billingEnabled && !revealed && (
-            <button onClick={() => openSheet('reveal')} className="shrink-0 rounded-md bg-haldi px-3 py-2 text-xs font-extrabold text-ink transition-colors hover:bg-haldi-dark hover:text-paper sm:text-sm">
-              Reveal Identity ₹29 →
-            </button>
-          )}
         </div>
         <RevealCard identity={revealed} />
-        <ChatTimer started={timer.started} remaining={timer.remaining} fraction={timer.fraction} waitingFor={waitingFor} />
+        <ChatTimer started={timer.started} remaining={timer.remaining} fraction={timer.fraction} waitingFor={waitingFor} isUnlocked={isUnlocked} />
       </header>
 
       <div className="relative flex-1 overflow-hidden">
-        <div className={cn('bandhani h-full overflow-y-auto px-4 py-5 transition-[filter] duration-500', timer.expired && billingEnabled && 'pointer-events-none blur-[3px]')}>
+        <div className={cn('bandhani h-full overflow-y-auto px-4 py-5 transition-[filter] duration-500', isExpired && billingEnabled && 'pointer-events-none blur-[3px]')}>
           <div className="mx-auto flex max-w-2xl flex-col gap-2">
             {messages.length === 0 && (
               <div className="mx-auto my-10 max-w-xs rounded-lg stitch bg-ink-2 p-5 text-center">
@@ -242,7 +244,7 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
             <div ref={bottom} />
           </div>
         </div>
-        {billingEnabled && <TimerExpiredOverlay show={timer.expired && sheet === null} onExtend={() => openSheet('extend')} />}
+        {billingEnabled && <TimerExpiredOverlay show={isExpired && sheet === null} partnerName={partner.display_name} onExtend={openSheet} />}
       </div>
 
       {closedFree ? (
@@ -260,25 +262,25 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
       ) : (
       <form
         onSubmit={send}
-        className={cn('border-t border-paper/10 bg-ink-2 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 transition-[filter,opacity]', timer.expired && 'opacity-50 blur-[1px]')}
+        className={cn('border-t border-paper/10 bg-ink-2 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 transition-[filter,opacity]', isExpired && 'opacity-50 blur-[1px]')}
       >
         {sendError && <p className="mx-auto mb-2 max-w-2xl px-2 text-xs text-[#E58A7F]">{sendError}</p>}
         <div className="mx-auto flex max-w-2xl items-center gap-2">
           <input
             value={text}
             onChange={(e) => setText(e.target.value)}
-            disabled={timer.expired}
+            disabled={isExpired}
             maxLength={1000}
             aria-label="Message"
             autoComplete="off"
             enterKeyHint="send"
-            placeholder={timer.expired ? 'Chat closed' : 'Message'}
+            placeholder={isExpired ? 'Chat closed' : 'Message'}
             className="h-12 flex-1 rounded-full border border-paper/15 bg-ink px-5 text-[15px] text-paper placeholder:text-paper/35 focus:border-haldi focus:outline-none disabled:cursor-not-allowed"
           />
           <motion.button
             whileTap={{ scale: 0.9 }}
             type="submit"
-            disabled={timer.expired || !text.trim()}
+            disabled={isExpired || !text.trim()}
             aria-label="Send"
             className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-kumkum text-paper transition-colors hover:bg-kumkum-dark disabled:opacity-40"
           >
@@ -288,12 +290,7 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
       </form>
       )}
 
-      {billingEnabled && (
-        <>
-          <RevealModal open={sheet === 'reveal'} onClose={() => setSheet(null)} onPay={() => startPayment('reveal')} busy={busy} error={payError} partnerName={partner.display_name} />
-          <ExtendModal open={sheet === 'extend'} onClose={() => setSheet(null)} onPay={() => startPayment('extend')} busy={busy} error={payError} />
-        </>
-      )}
+      {billingEnabled && <ExtendModal open={sheet === 'extend'} partnerName={partner.display_name} onClose={() => setSheet(null)} onPay={startPayment} busy={busy} error={payError} />}
       <Toast message={toast} onDone={() => setToast(null)} />
     </main>
   );

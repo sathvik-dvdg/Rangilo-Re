@@ -5,6 +5,11 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/** Narrows parsed JSON so fields can be read without a cast. */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 export function initials(name: string) {
   const parts = name.replace(/_\d+$/, '').split(/[_\s]+/).filter(Boolean);
   const first = parts[0]?.[0] ?? '?';

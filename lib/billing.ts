@@ -88,6 +88,24 @@ export function getBillingStatus(env: Env = process.env): BillingStatus {
 }
 
 /**
+ * The effective mode in one word. 'unavailable' means Paid Mode was requested
+ * but the readiness check failed, so billing stays off.
+ *
+ * Do not set BILLING_MODE=paid in production: the OBJECTIVES.md §8 gates are
+ * not met (CFG-002, FREE-008). Passing the readiness check is not approval.
+ */
+export function getBillingMode(env: Env = process.env): BillingMode | 'unavailable' {
+  const status = getBillingStatus(env);
+  if (status.mode === 'paid') return 'paid';
+  return status.requested === 'paid' ? 'unavailable' : 'free';
+}
+
+/** True only when Paid Mode is requested and every Razorpay setting is ready. */
+export function isBillingEnabled(env: Env = process.env): boolean {
+  return getBillingStatus(env).mode === 'paid';
+}
+
+/**
  * For billing endpoints: null when payments are on, otherwise the response
  * to send. 403 when billing is deliberately off, 503 when Paid Mode was
  * requested but is misconfigured.

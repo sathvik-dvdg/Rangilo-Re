@@ -142,9 +142,12 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
     setError(null);
     setUsers(null);
     fetch('/api/users')
-      .then((r) => (r.ok ? r.json() : Promise.reject(r)))
-      .then((d) => setUsers(d.users))
-      .catch(() => setError('Could not load dancers. Check your connection and try again.'));
+      .then(async (r) => {
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error ?? 'Could not load dancers. Try again in a moment.');
+        setUsers(d.users);
+      })
+      .catch((e: Error) => setError(e.message || 'Could not load dancers. Try again in a moment.'));
   }, [me, attempt]);
 
   const visible = useMemo(() => {
@@ -339,7 +342,7 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
                   <Lock className="h-3 w-3" />
                 </span>
                 <p className="leading-snug">
-                  <strong className="text-haldi font-bold">Anonymous Lobby:</strong> All dancer profiles are locked. Tap anyone to start a 2-min chat, then unlock their real identity for ₹29!
+                  <strong className="text-haldi font-bold">Anonymous Lobby:</strong> All dancer profiles are locked. Tap anyone to start a 2-min chat.
                 </p>
               </div>
             </div>

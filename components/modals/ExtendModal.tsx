@@ -13,18 +13,41 @@ function Hourglass() {
   );
 }
 
-export function ExtendModal({ open, onClose, onPay, busy, error }: { open: boolean; onClose: () => void; onPay: () => void; busy: boolean; error: string | null }) {
+export function ExtendModal({
+  open,
+  partnerName,
+  onClose,
+  onPay,
+  busy,
+  error,
+}: {
+  open: boolean;
+  partnerName?: string;
+  onClose: () => void;
+  onPay: () => void;
+  busy: boolean;
+  error: string | null;
+}) {
   return (
     <BottomSheet open={open} onClose={onClose}>
       <Hourglass />
-      <h2 className="mt-3 font-display text-2xl text-paper">Keep the Connection Going</h2>
-      <p className="mt-1 text-sm text-paper/60">Get 2 more minutes of private chat.</p>
+      <h2 className="mt-3 font-display text-2xl text-paper">Unlock Unlimited Chat & Profile</h2>
+      <p className="mt-1 text-sm text-paper/60">
+        Chat with {partnerName ?? 'your partner'} without any time limit and discover their real name.
+      </p>
       <div className="mt-5 flex items-baseline gap-2">
         <span className="font-display text-4xl text-haldi">₹29</span>
+        <span className="text-xs text-paper/50">one-time unlock</span>
       </div>
-      <Perks items={['+2 min added instantly', 'Chat history preserved']} />
+      <Perks
+        items={[
+          '♾️ Unlimited chat — no time limit',
+          '🔓 Real name & verified email revealed',
+          '💬 All chat history preserved forever',
+        ]}
+      />
       {error && <p className="mt-4 text-sm text-[#E58A7F]">{error}</p>}
-      <RazorpayButton busy={busy} onClick={onPay} label="Pay ₹29 with Razorpay" />
+      <RazorpayButton busy={busy} onClick={onPay} label="Unlock for ₹29 with Razorpay" />
     </BottomSheet>
   );
 }

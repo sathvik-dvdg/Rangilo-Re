@@ -92,8 +92,8 @@ describe('Campus Profiles & Privacy Rules', () => {
     });
   });
 
-  describe('Identity Reveal with Instagram', () => {
-    it('returns instagram_handle alongside real_name and email when unlocked', async () => {
+  describe('Pre-existing reveals rows (DEC-003)', () => {
+    it('never selects or returns instagram_handle for a reveals row (PRIV-001, ID-001)', async () => {
       mocks.supabaseFrom.mockImplementation((table: string) => {
         if (table === 'reveals') {
           return {
@@ -109,7 +109,7 @@ describe('Campus Profiles & Privacy Rules', () => {
         if (table === 'users') {
           return {
             select: (cols: string) => {
-              expect(cols).toContain('instagram_handle');
+              expect(cols).not.toContain('instagram_handle');
               expect(cols).toContain('real_name');
               expect(cols).toContain('email');
               return {
@@ -119,7 +119,6 @@ describe('Campus Profiles & Privacy Rules', () => {
                       data: {
                         real_name: 'Bob Sharma',
                         email: 'bob@example.com',
-                        instagram_handle: 'bob_garba',
                       },
                       error: null,
                     }),
@@ -135,8 +134,8 @@ describe('Campus Profiles & Privacy Rules', () => {
       expect(identity).toEqual({
         real_name: 'Bob Sharma',
         email: 'bob@example.com',
-        instagram_handle: 'bob_garba',
       });
+      expect(identity).not.toHaveProperty('instagram_handle');
     });
 
     it('returns null when no reveal record exists', async () => {
@@ -162,7 +161,7 @@ describe('Campus Profiles & Privacy Rules', () => {
 
   describe('completeOnboarding Input Sanitization', () => {
     it('sanitizes instagram handle by removing leading @ and trimming whitespace', async () => {
-      let savedPayload: Record<string, unknown> | null = null;
+      const saved: Record<string, unknown>[] = [];
 
       mocks.supabaseFrom.mockImplementation((table: string) => {
         if (table === 'users') {
@@ -176,7 +175,7 @@ describe('Campus Profiles & Privacy Rules', () => {
               return chain;
             },
             upsert: (payload: Record<string, unknown>) => {
-              savedPayload = payload;
+              saved.push(payload);
               return Promise.resolve({ error: null });
             },
           };
@@ -201,12 +200,13 @@ describe('Campus Profiles & Privacy Rules', () => {
       });
 
       expect(result).toEqual({ ok: true });
-      expect(savedPayload).not.toBeNull();
-      expect(savedPayload?.instagram_handle).toBe('alice_dancer_2026');
-      expect(savedPayload?.branch).toBe('ISE');
-      expect(savedPayload?.college_year).toBe('2nd Year');
-      expect(savedPayload?.vibe_tag).toBe('Here for Dandiya 🥢');
-      expect(savedPayload?.outfit_color).toBe('Red & Yellow Bandhani Chaniya Choli');
+      expect(saved).toHaveLength(1);
+      const savedPayload = saved[0];
+      expect(savedPayload.instagram_handle).toBe('alice_dancer_2026');
+      expect(savedPayload.branch).toBe('ISE');
+      expect(savedPayload.college_year).toBe('2nd Year');
+      expect(savedPayload.vibe_tag).toBe('Here for Dandiya 🥢');
+      expect(savedPayload.outfit_color).toBe('Red & Yellow Bandhani Chaniya Choli');
     });
   });
 });

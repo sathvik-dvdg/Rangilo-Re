@@ -1,63 +1,214 @@
 import 'server-only';
 import { supabaseAdmin } from './supabaseAdmin';
-import { PRICE_PAISE, partnerFromRoomId } from './room';
+import { partnerFromRoomId } from './room';
+import { isRecord } from './utils';
 import type { PaymentType } from './types';
 
-export type OrderNotes = {
-  type: PaymentType;
-  userId: string;
-  targetUserId?: string;
-  roomId?: string;
+/**
+ * Payment ledger (PAY-003): one `payment_orders` row per Razorpay order this
+ * app created. Every function here uses the service role client, so callers
+ * must authorise first: a signed-in user for create-order, a verified
+ * checkout signature for verify, a verified webhook signature for the webhook.
+ *
+ * Do not enable Paid Mode in production: the OBJECTIVES.md §8 gates are not met.
+ */
+
+/** 'fulfilment_failed': the payment was captured but nothing could be granted (PAY-010). */
+export type PaymentOrderStatus = 'created' | 'paid' | 'failed' | 'fulfilment_failed';
+
+const ORDER_STATUSES: readonly unknown[] = ['created', 'paid', 'failed', 'fulfilment_failed'] satisfies PaymentOrderStatus[];
+const isOrderStatus = (value: unknown): value is PaymentOrderStatus => ORDER_STATUSES.includes(value);
+
+export type PaymentOrder = {
+  user_id: string;
+  room_id: string;
+  order_id: string;
+  payment_id: string | null;
+  status: PaymentOrderStatus;
+  amount: number;
+  currency: string;
 };
 
-export function parseNotes(notes: unknown): OrderNotes | null {
-  if (!notes || typeof notes !== 'object') return null;
-  const n = notes as Record<string, unknown>;
-  if ((n.type !== 'reveal' && n.type !== 'extend') || typeof n.userId !== 'string') return null;
-  return {
-    type: n.type,
-    userId: n.userId,
-    targetUserId: typeof n.targetUserId === 'string' ? n.targetUserId : undefined,
-    roomId: typeof n.roomId === 'string' ? n.roomId : undefined,
-  };
+/** What create-order writes on the Razorpay order, for reading in their dashboard only. */
+export type OrderNotes = { type: PaymentType; userId: string; roomId: string };
+
+const ORDER_COLUMNS = 'user_id, room_id, order_id, payment_id, status, amount, currency';
+const EXTENSION_SECONDS = 120;
+
+function toPaymentOrder(row: unknown): PaymentOrder {
+  if (isRecord(row)) {
+    const { user_id, room_id, order_id, payment_id, status, amount, currency } = row;
+    if (
+      typeof user_id === 'string' &&
+      typeof room_id === 'string' &&
+      typeof order_id === 'string' &&
+      isOrderStatus(status) &&
+      typeof amount === 'number' &&
+      typeof currency === 'string'
+    ) {
+      return { user_id, room_id, order_id, payment_id: typeof payment_id === 'string' ? payment_id : null, status, amount, currency };
+    }
+  }
+  throw new Error('Malformed payment_orders row');
+}
+
+export async function recordOrder(order: { userId: string; roomId: string; orderId: string; amount: number; currency: string }) {
+  const { error } = await supabaseAdmin().from('payment_orders').insert({
+    user_id: order.userId,
+    room_id: order.roomId,
+    order_id: order.orderId,
+    status: 'created',
+    amount: order.amount,
+    currency: order.currency,
+  });
+  if (error) throw error;
+}
+
+/** Null when this app never created the order: nothing may be granted for it. */
+export async function getOrder(orderId: string): Promise<PaymentOrder | null> {
+  const { data, error } = await supabaseAdmin().from('payment_orders').select(ORDER_COLUMNS).eq('order_id', orderId).maybeSingle();
+  if (error) throw error;
+  return data ? toPaymentOrder(data) : null;
 }
 
 /**
- * Applies a paid order. Idempotent: payment_id is unique in both tables, so
- * the checkout handler and the webhook can both call this for the same
- * payment without double-unlocking.
- *
- * Everything it acts on comes from the order notes we wrote server-side when
- * creating the order, never from the client's verify request body.
+ * A fulfilment failure that retrying cannot fix: the order's room is not one
+ * the buyer is in, or it no longer exists. Anything else thrown while
+ * settling (a database or network error) is treated as temporary.
  */
-export async function fulfill(notes: OrderNotes, paymentId: string, amount: number) {
-  if (amount !== PRICE_PAISE) throw new Error('Unexpected amount');
-  const db = supabaseAdmin();
+export class FulfilmentError extends Error {
+  constructor(public reason: 'bad_room' | 'room_not_found') {
+    super(`Fulfilment failed: ${reason}`);
+  }
+}
 
-  if (notes.type === 'reveal') {
-    if (!notes.targetUserId) throw new Error('Missing target');
-    const { error } = await db.from('reveals').upsert(
+// Postgres foreign_key_violation: chat_extensions.room_id has no rooms row.
+const FOREIGN_KEY_VIOLATION = '23503';
+
+/**
+ * Grants the extension an order paid for and marks the order paid.
+ * Idempotent: an order already marked paid is left alone, so the checkout
+ * handler and the webhook (or a repeated webhook) grant once between them.
+ *
+ * The grant comes first and is itself keyed on payment_id, so a crash between
+ * the two writes is repaired by the next delivery instead of leaving an order
+ * marked paid with nothing granted.
+ *
+ * Throws FulfilmentError for a permanent failure. Routes call fulfilOrder,
+ * which records that on the ledger.
+ */
+export async function settlePayment(order: PaymentOrder, paymentId: string): Promise<'fulfilled' | 'already_processed'> {
+  if (order.status === 'paid') {
+    if (order.payment_id !== paymentId) {
+      console.warn('[billing] second payment for an order that is already paid; nothing granted', { orderId: order.order_id, paymentId });
+    }
+    return 'already_processed';
+  }
+  const partnerId = partnerFromRoomId(order.room_id, order.user_id);
+  if (!partnerId) throw new FulfilmentError('bad_room');
+
+  const db = supabaseAdmin();
+  const grant = await db.from('chat_extensions').upsert(
+    {
+      room_id: order.room_id,
+      payment_id: paymentId,
+      extra_seconds: EXTENSION_SECONDS,
+      paid_at: new Date().toISOString(),
+    },
+    { onConflict: 'payment_id', ignoreDuplicates: true },
+  );
+  if (grant.error) {
+    if (grant.error.code === FOREIGN_KEY_VIOLATION) throw new FulfilmentError('room_not_found');
+    throw grant.error;
+  }
+
+  // Grant partner identity and real name reveal to buyer (unlimited chat & profile reveal)
+  try {
+    await db.from('reveals').upsert(
       {
-        payer_id: notes.userId,
-        target_id: notes.targetUserId,
+        payer_id: order.user_id,
+        target_id: partnerId,
         payment_id: paymentId,
         paid_at: new Date().toISOString(),
       },
       { onConflict: 'payer_id,target_id', ignoreDuplicates: true },
     );
-    if (error) throw error;
-    return;
+  } catch (err) {
+    console.error('[billing] could not insert reveals row', err);
   }
 
-  if (!notes.roomId || !partnerFromRoomId(notes.roomId, notes.userId)) throw new Error('Bad room');
-  const { error } = await db.from('chat_extensions').upsert(
-    {
-      room_id: notes.roomId,
-      payment_id: paymentId,
-      extra_seconds: 120,
-      paid_at: new Date().toISOString(),
-    },
-    { onConflict: 'payment_id', ignoreDuplicates: true },
-  );
+  const paid = await db.from('payment_orders').update({ status: 'paid', payment_id: paymentId }).eq('order_id', order.order_id).neq('status', 'paid');
+  if (paid.error) throw paid.error;
+  return 'fulfilled';
+}
+
+/**
+ * Settles a captured payment, or records that it cannot be fulfilled (PAY-010).
+ * A permanent failure leaves the order `fulfilment_failed` for review or
+ * refund and is returned, not thrown, so the webhook can acknowledge it and
+ * Razorpay stops retrying. A temporary failure still throws, so the caller
+ * answers 5xx and the next delivery tries again. An order left
+ * `fulfilment_failed` is settled by a later delivery if the cause has gone.
+ */
+export async function fulfilOrder(order: PaymentOrder, paymentId: string): Promise<'fulfilled' | 'already_processed' | 'fulfilment_failed'> {
+  try {
+    return await settlePayment(order, paymentId);
+  } catch (e) {
+    if (!(e instanceof FulfilmentError)) throw e;
+    const { error } = await supabaseAdmin()
+      .from('payment_orders')
+      .update({ status: 'fulfilment_failed', payment_id: paymentId })
+      .eq('order_id', order.order_id)
+      .neq('status', 'paid');
+    if (error) throw error;
+    // The only alert there is until OPS-003 exists. Ids only, no personal data.
+    console.error('[billing] fulfilment_failed: payment captured but nothing granted; review for refund', {
+      orderId: order.order_id,
+      paymentId,
+      reason: e.reason,
+    });
+    return 'fulfilment_failed';
+  }
+}
+
+/**
+ * Records a failed attempt. Never downgrades a paid order, or one holding a
+ * captured payment that could not be fulfilled; a later successful attempt
+ * can still settle it.
+ */
+export async function recordFailedPayment(order: PaymentOrder, paymentId: string) {
+  if (order.status === 'paid' || order.status === 'fulfilment_failed') return;
+  const { error } = await supabaseAdmin()
+    .from('payment_orders')
+    .update({ status: 'failed', payment_id: paymentId })
+    .eq('order_id', order.order_id)
+    .neq('status', 'paid')
+    .neq('status', 'fulfilment_failed');
+  if (error) throw error;
+}
+
+/** A webhook event the handler has finished with. `outcome` says what it did. */
+export type WebhookEventRecord = { eventId: string; event: string; orderId?: string; paymentId?: string; outcome: string };
+
+/** True when this Razorpay event id has already been handled (PAY-008). */
+export async function hasProcessedEvent(eventId: string): Promise<boolean> {
+  const { data, error } = await supabaseAdmin().from('webhook_events').select('event_id').eq('event_id', eventId).maybeSingle();
+  if (error) throw error;
+  return data !== null;
+}
+
+/**
+ * Records a handled event. Called only once handling has finished, so an
+ * event whose handling failed part-way is processed again when Razorpay
+ * redelivers it. Two deliveries racing each other can both get past
+ * hasProcessedEvent; settlePayment's own idempotency covers that case.
+ */
+export async function recordEvent(record: WebhookEventRecord) {
+  const { error } = await supabaseAdmin()
+    .from('webhook_events')
+    .upsert(
+      { event_id: record.eventId, event: record.event, order_id: record.orderId ?? null, payment_id: record.paymentId ?? null, outcome: record.outcome },
+      { onConflict: 'event_id', ignoreDuplicates: true },
+    );
   if (error) throw error;
 }
