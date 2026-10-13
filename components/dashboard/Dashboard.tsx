@@ -142,7 +142,7 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
                   </p>
                   {me.email && (
                     <span className="text-paper/40">
-                      Gmail: <span className="text-paper/75">{me.email}</span> (hidden until ₹29 unlock)
+                      Gmail: <span className="text-paper/75">{me.email}</span> (hidden from other dancers)
                     </span>
                   )}
                 </div>

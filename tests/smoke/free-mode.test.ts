@@ -165,11 +165,11 @@ describe('Free Mode smoke (in-process, providers mocked)', () => {
 
 describe('control: the same render in Paid Mode does show payment UI', () => {
   // Proves the absence checks above can fail. Rendering only; no payment is attempted.
-  it('reveal and extend offers appear when Paid Mode is effective', async () => {
+  it('the extend offer appears when Paid Mode is effective; identity is never for sale (DEC-002)', async () => {
     vi.stubEnv('BILLING_MODE', 'paid');
     room.state = roomState(new Date(Date.now() - 60 * 60 * 1000).toISOString());
     const html = await renderChat();
-    expect(html).toMatch(/Reveal Identity ₹29/);
+    expect(html).not.toMatch(/Reveal Identity/i);
     expect(html).toMatch(/Extend Chat ₹29/);
   });
 });

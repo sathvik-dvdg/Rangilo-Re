@@ -1,80 +1,99 @@
 /**
- * Two crossed dandiya sticks, drawn for small sizes (the cursor ships at
- * 20 px). The crimson-led stick points: its gold tip is the hotspot at
- * DANDIYA_HOTSPOT. Only the emerald-led stick moves: it swings open on
- * hover and strikes the crimson one on press.
+ * A single dandiya stick, drawn for cursor size: it ships at 18 px, where one
+ * viewBox unit is one CSS pixel. Flat palette fills only: kumkum body, two
+ * haldi bands at the grip and a hairline ink edge. The outer edge of the tip
+ * is the hotspot at DANDIYA_HOTSPOT; hover and press scale the stick about
+ * that point, so the tip never leaves the click point.
  */
 
 export type DandiyaState = 'default' | 'hover' | 'press';
 
-/** Hotspot in viewBox units (0–56). */
-export const DANDIYA_HOTSPOT = 3;
-const VIEWBOX = 56;
-/** Where the sticks cross; the emerald stick pivots here. */
-const CROSS = 25.7;
-const SWING: Record<DandiyaState, number> = { default: 0, hover: 12, press: -8 };
+/** Hotspot in viewBox units (0–18), on both axes. */
+export const DANDIYA_HOTSPOT = 2;
+const VIEWBOX = 18;
+/** Degrees from vertical; the tip points up and to the left. */
+const TILT = 35;
+const SCALE: Record<DandiyaState, number> = { default: 1, hover: 1.15, press: 0.9 };
 
-const CRIMSON = '#B23A2E';
-const EMERALD = '#1D6A4C';
-const GOLD = '#D8A23A';
-const INK = '#1A1410';
-const PAPER = '#F3EADB';
-
-// [from, to, width] along a stick, 0 = tip, 60 = handle end. Bands are wide
-// enough to survive at 20 px; the dotted motifs and tassels of the large
-// artwork are left out because they render below a pixel.
-const WRAPS: [number, number, number][] = [
-  [2, 16, 4.8],
-  [16, 18, 5.2],
-  [18, 30.4, 5.2],
-  [30.4, 32.4, 5.6],
-  [32.4, 44.6, 5.5],
-  [44.6, 46.6, 5.9],
-  [46.6, 57.6, 5.8],
+// Stick geometry along its own axis: 0 is the outer edge of the tip (the
+// hotspot), so the fill starts half the 1 px edge stroke further in.
+const TOP = 0.5;
+const END = 18.2;
+const R_TIP = 1.1;
+const R_END = 1.6;
+const C_TIP = TOP + R_TIP;
+const C_END = +(END - R_END).toFixed(2);
+const TIP_TO = 4.4;
+const BANDS: [number, number][] = [
+  [11, 12.2],
+  [14.2, 15.4],
 ];
 
-function Stick({ main }: { main: string }) {
-  const other = main === CRIMSON ? EMERALD : CRIMSON;
-  const colors = [main, GOLD, other, GOLD, main, GOLD, other];
-  return (
-    <>
-      {/* Paper halo and ink rim keep the sticks readable on dark and light sections. */}
-      <line y1={1} y2={59} stroke={PAPER} strokeWidth={10.5} strokeLinecap="round" />
-      <line y1={1} y2={59} stroke={INK} strokeWidth={7.4} strokeLinecap="round" />
-      {WRAPS.map(([from, to, width], i) => (
-        <line key={i} y1={from} y2={to} stroke={colors[i]} strokeWidth={width} />
-      ))}
-      <circle cy={1.9} r={2.6} fill={GOLD} />
-      <circle cy={58} r={3} fill={GOLD} />
-      <line x1={1.7} y1={3} x2={2.1} y2={57} stroke={INK} strokeOpacity={0.3} strokeWidth={1.3} />
-    </>
-  );
-}
+/** Half-width at a point along the stick; it tapers slightly towards the tip. */
+const halfWidth = (at: number) => +(R_TIP + ((at - C_TIP) / (C_END - C_TIP)) * (R_END - R_TIP)).toFixed(2);
+const slice = (from: number, to: number) =>
+  `M${-halfWidth(from)} ${from}L${halfWidth(from)} ${from}L${halfWidth(to)} ${to}L${-halfWidth(to)} ${to}Z`;
+
+const OUTLINE = `M${-R_TIP} ${C_TIP}A${R_TIP} ${R_TIP} 0 0 1 ${R_TIP} ${C_TIP}L${R_END} ${C_END}A${R_END} ${R_END} 0 0 1 ${-R_END} ${C_END}Z`;
+const TIP = `M${-R_TIP} ${C_TIP}A${R_TIP} ${R_TIP} 0 0 1 ${R_TIP} ${C_TIP}L${halfWidth(TIP_TO)} ${TIP_TO}L${-halfWidth(TIP_TO)} ${TIP_TO}Z`;
 
 export function DandiyaSticks({ size, state = 'default', animate = true }: { size: number; state?: DandiyaState; animate?: boolean }) {
-  const transition = animate ? 'transform 120ms ease-out, opacity 120ms ease-out' : 'none';
+  const transition = animate ? 'transform 140ms ease-out, fill 140ms ease-out' : 'none';
   return (
     <svg viewBox={`0 0 ${VIEWBOX} ${VIEWBOX}`} width={size} height={size} aria-hidden focusable="false" style={{ display: 'block', overflow: 'visible' }}>
       <g
         style={{
-          transform: `rotate(${SWING[state]}deg)`,
+          transform: `scale(${SCALE[state]})`,
           transformBox: 'view-box',
-          transformOrigin: `${CROSS}px ${CROSS}px`,
+          transformOrigin: `${DANDIYA_HOTSPOT}px ${DANDIYA_HOTSPOT}px`,
           transition,
         }}
       >
-        <g transform="translate(47.9 3.5) rotate(45)">
-          <Stick main={EMERALD} />
+        <g transform={`translate(${DANDIYA_HOTSPOT} ${DANDIYA_HOTSPOT}) rotate(${-TILT})`}>
+          <path d={OUTLINE} className="fill-kumkum" />
+          {/* The tip lights up on hover and stays lit through the press. */}
+          <path d={TIP} className={state === 'default' ? 'fill-kumkum' : 'fill-haldi'} style={{ transition }} />
+          {BANDS.map(([from, to]) => (
+            <path key={from} d={slice(from, to)} className="fill-haldi" />
+          ))}
+          {/* One hairline edge instead of a halo: it separates the stick from paper and kumkum surfaces. */}
+          <path d={OUTLINE} className="fill-none stroke-ink/60" strokeWidth={1} />
         </g>
       </g>
-      <g transform="translate(3.5 3.5) rotate(-45)">
-        <Stick main={CRIMSON} />
-      </g>
-      {/* The "clack": three gold ticks between the raised sticks, shown only on press. */}
-      <g stroke={GOLD} strokeWidth={2} strokeLinecap="round" style={{ opacity: state === 'press' ? 1 : 0, transition }}>
-        <line x1={25.7} y1={17.2} x2={25.7} y2={12.6} />
-        <line x1={30} y1={18.4} x2={32.3} y2={14.4} />
-        <line x1={21.4} y1={18.4} x2={19.1} y2={14.4} />
+    </svg>
+  );
+}
+
+// Spark ticks fan out from the tip, away from the stick: [degrees off the
+// stick's axis, start, end] in viewBox units from the hotspot.
+const SPARKS: [number, number, number][] = [
+  [-80, 3.2, 5.6],
+  [-28, 3.4, 6.6],
+  [28, 3.4, 6.6],
+  [80, 3.2, 5.6],
+];
+
+/**
+ * The strike spark, drawn in the same box as the stick so the two overlay
+ * exactly. Static artwork: the caller animates it.
+ */
+export function DandiyaSpark({ size }: { size: number }) {
+  return (
+    <svg viewBox={`0 0 ${VIEWBOX} ${VIEWBOX}`} width={size} height={size} aria-hidden focusable="false" style={{ display: 'block', overflow: 'visible' }}>
+      <g transform={`translate(${DANDIYA_HOTSPOT} ${DANDIYA_HOTSPOT}) rotate(${-TILT})`} strokeLinecap="round">
+        {SPARKS.map(([angle, from, to]) => {
+          const rad = (angle * Math.PI) / 180;
+          const at = (r: number) => ({ x: +(r * Math.sin(rad)).toFixed(2), y: +(-r * Math.cos(rad)).toFixed(2) });
+          const a = at(from);
+          const b = at(to);
+          return (
+            <g key={angle}>
+              {/* Same ink edge as the stick, so haldi ticks hold up on paper and haldi surfaces. */}
+              <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} className="stroke-ink/60" strokeWidth={2.4} />
+              <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} className="stroke-haldi" strokeWidth={1.2} />
+            </g>
+          );
+        })}
       </g>
     </svg>
   );

@@ -10,7 +10,6 @@ import { ChatTimer } from './ChatTimer';
 import { MessageBubble } from './MessageBubble';
 import { RevealCard } from './RevealCard';
 import { TimerExpiredOverlay } from './TimerExpiredOverlay';
-import { RevealModal } from '@/components/modals/RevealModal';
 import { ExtendModal } from '@/components/modals/ExtendModal';
 import { Toast } from '@/components/ui/Toast';
 import { useRoomRealtime } from '@/hooks/useSupabaseRealtime';
@@ -31,7 +30,7 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
   const revealed = storedReveal ?? initial.revealed;
 
   const [text, setText] = useState('');
-  const [sheet, setSheet] = useState<'reveal' | 'extend' | null>(null);
+  const [sheet, setSheet] = useState<'extend' | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
@@ -149,23 +148,17 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
     });
   };
 
-  const startPayment = async (type: 'reveal' | 'extend') => {
+  const startPayment = async () => {
     if (!billingEnabled) return;
-    const result = await pay(type, { targetUserId: partner.clerk_id, roomId });
-    if (!result) return;
+    if (!(await pay(roomId))) return;
     setSheet(null);
-    if (result.type === 'reveal') {
-      setRevealedInStore(partner.clerk_id, result.identity);
-      setToast('Identity unlocked');
-    } else {
-      await refresh();
-      setToast('+2 minutes added');
-    }
+    await refresh();
+    setToast('+2 minutes added');
   };
 
-  const openSheet = (s: 'reveal' | 'extend') => {
+  const openSheet = () => {
     clearError();
-    setSheet(s);
+    setSheet('extend');
   };
 
   const waitingFor = !timer.started
@@ -191,11 +184,6 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
               <span className="text-xs text-paper/60">{partnerHere ? 'in the room' : 'away'}</span>
             </div>
           </div>
-          {billingEnabled && !revealed && (
-            <button onClick={() => openSheet('reveal')} className="shrink-0 rounded-md bg-haldi px-3 py-2 text-xs font-extrabold text-ink transition-colors hover:bg-haldi-dark hover:text-paper sm:text-sm">
-              Reveal Identity ₹29 →
-            </button>
-          )}
         </div>
         <RevealCard identity={revealed} />
         <ChatTimer started={timer.started} remaining={timer.remaining} fraction={timer.fraction} waitingFor={waitingFor} />
@@ -216,7 +204,7 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
             <div ref={bottom} />
           </div>
         </div>
-        {billingEnabled && <TimerExpiredOverlay show={timer.expired && sheet === null} onExtend={() => openSheet('extend')} />}
+        {billingEnabled && <TimerExpiredOverlay show={timer.expired && sheet === null} onExtend={openSheet} />}
       </div>
 
       {closedFree ? (
@@ -262,12 +250,7 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
       </form>
       )}
 
-      {billingEnabled && (
-        <>
-          <RevealModal open={sheet === 'reveal'} onClose={() => setSheet(null)} onPay={() => startPayment('reveal')} busy={busy} error={payError} partnerName={partner.display_name} />
-          <ExtendModal open={sheet === 'extend'} onClose={() => setSheet(null)} onPay={() => startPayment('extend')} busy={busy} error={payError} />
-        </>
-      )}
+      {billingEnabled && <ExtendModal open={sheet === 'extend'} onClose={() => setSheet(null)} onPay={startPayment} busy={busy} error={payError} />}
       <Toast message={toast} onDone={() => setToast(null)} />
     </main>
   );

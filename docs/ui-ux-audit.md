@@ -64,6 +64,7 @@ Not changed (outside this audit's scope or needs a decision): landing copy, fabr
 | `components/layout/MotionPreferences.tsx` (new), `app/layout.tsx` | Reduced-motion config; Android keyboard viewport behaviour. |
 | `hooks/useLenis.ts`, `app/globals.css` | No smooth scroll and no CSS loops under reduced motion; global focus-visible outline. |
 | `app/(auth)/layout.tsx`, `lib/clerkAppearance.ts` | `100dvh` layout; 44px Clerk buttons and inputs. |
+| `components/ui/DandiyaSticks.tsx`, `components/layout/CustomCursor.tsx` | Cursor redrawn as one 18px dandiya stick in palette tokens only (kumkum body, two haldi bands, 1px ink edge at 60%, no halo); follows the pointer with no easing, scales 1.15 with a haldi tip on hover and 0.9 on press; a mouse click on a link or button plays a 360ms four-tick haldi spark from the tip (off under reduced motion). |
 
 Behaviour preserved: routes, auth, API calls, billing gating, form submission and validation logic are unchanged. The expired-chat strings checked by the Free Mode smoke test are unchanged.
 

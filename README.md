@@ -18,7 +18,7 @@ Known gaps that block a public launch (details and IDs in `OBJECTIVES.md` §17 a
 
 - No blocking, reporting, age confirmation or rate limiting yet.
 - The landing page still shows placeholder statistics, testimonials and ₹29 claims that need replacing.
-- Identity sharing is being redesigned as free, mutual and opt-in. The older paid "reveal" code still exists but is unreachable in Free Mode and must be removed before any paid launch.
+- Identity sharing is being redesigned as free, mutual and opt-in. The older paid "reveal" purchase flow has been removed; identities from any existing `reveals` rows are still shown, and what to do with them is undecided (`OBJECTIVES.md` DEC-003).
 - Realtime presence channels are public.
 - Payment provider eligibility, a payment ledger and reconciliation are unresolved.
 
@@ -66,7 +66,7 @@ The server decides the mode in one place, [`lib/billing.ts`](lib/billing.ts), fr
 
 **Do not enable Paid Mode in production.** The gates in `OBJECTIVES.md` §8 (written provider eligibility, policies, payment testing, monitoring, legal review) and follow-ups FU-001 to FU-003 are not met.
 
-To work on Paid Mode with test keys: copy the key id and secret from Razorpay Dashboard → Settings → API Keys (test mode), add a webhook at `https://<your-domain>/api/webhooks/razorpay` for `payment.captured`, put its secret in `RAZORPAY_WEBHOOK_SECRET`, and set `BILLING_MODE=paid`.
+To work on Paid Mode with test keys: copy the key id and secret from Razorpay Dashboard → Settings → API Keys (test mode), add a webhook at `https://<your-domain>/api/webhooks/razorpay` for `payment.captured` and `payment.failed`, put its secret in `RAZORPAY_WEBHOOK_SECRET`, run `supabase/migrations/0002_payment_orders.sql` and then `0003_fulfilment_failed_and_webhook_events.sql` in the SQL editor (the payment ledger and the webhook event log), and set `BILLING_MODE=paid`. The only paid product is the ₹29 chat extension.
 
 ## Checks
 
@@ -134,7 +134,7 @@ The colours come from things you'd actually see at a garba, not from a screen: s
 Typography is Cinzel for display and Nunito for UI, both self-hosted through Fontsource.
 
 - **Mobile first.** Primary controls are at least 44px tall on phones, and layouts are checked from 320px up.
-- **Cursor.** On devices with a mouse, the pointer is a pair of crossed Dandiya sticks ([`components/ui/DandiyaSticks.tsx`](components/ui/DandiyaSticks.tsx)), drawn as inline SVG at 20px. Touch devices keep native behaviour, and text fields keep the system I-beam.
+- **Cursor.** On devices with a mouse, the pointer is a single Dandiya stick ([`components/ui/DandiyaSticks.tsx`](components/ui/DandiyaSticks.tsx)): a kumkum body with two haldi bands and a hairline ink edge, drawn as inline SVG at 18px with its tip on the click point. It tracks the mouse with no easing, grows slightly over links and buttons, shrinks on press, and throws a brief haldi spark from the tip when it clicks one. Touch devices keep native behaviour, and text fields keep the system I-beam.
 - **Accessibility.** Sheets are labelled dialogs that trap focus and return it on close, every control has a visible focus outline, and animations, smooth scrolling and the cursor's motion respect `prefers-reduced-motion`.
 
 ## Implementation notes

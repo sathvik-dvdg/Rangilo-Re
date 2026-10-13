@@ -240,11 +240,11 @@ export function OnboardingModal({
                           <Lock className="h-3.5 w-3.5" />
                         </div>
                         <p className="text-xs font-bold uppercase tracking-wider text-paper/90">
-                          Private Details (Unlocked via ₹29)
+                          Private Details
                         </p>
                       </div>
                       <p className="mt-1.5 text-xs text-paper/60 leading-relaxed">
-                        These remain hidden. When another dancer pays ₹29 to unlock your identity, your real name and Gmail will be revealed to them.
+                        These remain hidden from other dancers. Paying never unlocks them.
                       </p>
 
                       <div className="mt-3.5 space-y-3">
@@ -286,7 +286,7 @@ export function OnboardingModal({
                       {isEditing ? (
                         <>
                           <Button
-                            variant="secondary"
+                            variant="outline"
                             onClick={() => {
                               if (!name.trim()) {
                                 setError('Please enter a garba nickname.');

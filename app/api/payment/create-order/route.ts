@@ -1,50 +1,46 @@
 import { billingDisabledResponse } from '@/lib/billing';
+import { recordOrder, type OrderNotes } from '@/lib/payments';
 import { razorpay } from '@/lib/razorpay';
 import { PRICE_PAISE, partnerFromRoomId } from '@/lib/room';
-import { HttpError, errorResponse, getProfile, getRevealed, requireUserId } from '@/lib/server';
-import type { OrderNotes } from '@/lib/payments';
+import { HttpError, errorResponse, requireUserId } from '@/lib/server';
+import { isRecord } from '@/lib/utils';
 
 export const runtime = 'nodejs';
+
+const CURRENCY = 'INR';
 
 export async function POST(req: Request) {
   try {
     const userId = requireUserId();
     // Before touching the body, the database or Razorpay (FREE-004).
+    // Paid Mode must not be enabled in production: the OBJECTIVES.md §8 gates are not met.
     const disabled = billingDisabledResponse();
     if (disabled) return disabled;
 
-    const body = (await req.json().catch(() => ({}))) as {
-      type?: string;
-      targetUserId?: string;
-      roomId?: string;
-    };
+    const body: unknown = await req.json().catch(() => null);
+    const type = isRecord(body) ? body.type : undefined;
+    const roomId = isRecord(body) ? body.roomId : undefined;
 
-    const notes: OrderNotes = { type: body.type === 'extend' ? 'extend' : 'reveal', userId };
-    if (body.type !== 'reveal' && body.type !== 'extend') throw new HttpError(400, 'Unknown payment type');
-
-    if (notes.type === 'reveal') {
-      const target = body.targetUserId;
-      if (!target || target === userId || !(await getProfile(target))) throw new HttpError(400, 'Unknown dancer');
-      if (await getRevealed(userId, target)) throw new HttpError(409, 'Already unlocked');
-      notes.targetUserId = target;
-    } else {
-      if (!body.roomId || !partnerFromRoomId(body.roomId, userId)) throw new HttpError(400, 'Unknown room');
-      notes.roomId = body.roomId;
-    }
+    // The chat extension is the only paid product. Identity is never sold (DEC-002, ID-002).
+    if (type !== 'extend') throw new HttpError(400, 'Unknown payment type');
+    if (typeof roomId !== 'string' || !partnerFromRoomId(roomId, userId)) throw new HttpError(400, 'Unknown room');
 
     // Amount is fixed here, never taken from the client.
+    const notes: OrderNotes = { type, userId, roomId };
     const order = await razorpay().orders.create({
       amount: PRICE_PAISE,
-      currency: 'INR',
-      receipt: `gc_${notes.type}_${Date.now()}`,
-      notes: notes as unknown as Record<string, string>,
+      currency: CURRENCY,
+      receipt: `gc_${type}_${Date.now()}`,
+      notes,
     });
+    // The ledger row, not the Razorpay notes, is what verify and the webhook act on.
+    await recordOrder({ userId, roomId, orderId: order.id, amount: PRICE_PAISE, currency: CURRENCY });
 
     return Response.json({
       orderId: order.id,
       amount: PRICE_PAISE,
-      currency: 'INR',
-      keyId: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
+      currency: CURRENCY,
+      keyId: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID, // public key id only
     });
   } catch (e) {
     return errorResponse(e);
