@@ -6,6 +6,7 @@ import { ClerkProvider } from '@clerk/nextjs';
 import { clerkAppearance } from '@/lib/clerkAppearance';
 import { getClerkConfigProblems } from '@/lib/clerkConfig';
 import { SetupNotice } from '@/components/layout/SetupNotice';
+import { MotionPreferences } from '@/components/layout/MotionPreferences';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -18,6 +19,8 @@ export const dynamic = 'force-dynamic';
 
 export const viewport: Viewport = {
   themeColor: '#1A1410',
+  // Android Chrome shrinks the layout when the keyboard opens, so the chat composer stays visible.
+  interactiveWidget: 'resizes-content',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -36,7 +39,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <ClerkProvider appearance={clerkAppearance}>
       <html lang="en">
-        <body>{children}</body>
+        <body>
+          <MotionPreferences>{children}</MotionPreferences>
+        </body>
       </html>
     </ClerkProvider>
   );

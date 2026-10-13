@@ -3,20 +3,24 @@
 import { useEffect, useState } from 'react';
 import { FREE_CHAT_MS } from '@/lib/room';
 
-/** Remaining ms of chat time, ticking 4x/s. null until the clock has started. */
-export function useChatTimer(timerStart: string | null, extraSeconds: number) {
+/**
+ * Remaining ms of chat time, ticking 4x/s. null until the clock has started.
+ * The first render uses `renderedAt` (the server's clock, passed down as a
+ * prop) instead of reading Date.now(), so server and browser produce the same
+ * markup; reading the clock during render broke hydration of the chat page.
+ */
+export function useChatTimer(timerStart: string | null, extraSeconds: number, renderedAt?: number) {
   const total = FREE_CHAT_MS + extraSeconds * 1000;
-  const compute = () => (timerStart ? Math.max(0, total - (Date.now() - new Date(timerStart).getTime())) : null);
-  const [remaining, setRemaining] = useState<number | null>(compute);
+  const [now, setNow] = useState<number | null>(renderedAt ?? null);
 
   useEffect(() => {
-    setRemaining(compute());
+    setNow(Date.now());
     if (!timerStart) return;
-    const id = window.setInterval(() => setRemaining(compute()), 250);
+    const id = window.setInterval(() => setNow(Date.now()), 250);
     return () => window.clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timerStart, total]);
 
+  const remaining = timerStart && now !== null ? Math.max(0, total - (now - new Date(timerStart).getTime())) : null;
   return {
     remaining,
     total,

@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Check, CheckCheck, Clock } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -7,7 +8,12 @@ import type { Message } from '@/lib/types';
 
 export function MessageBubble({ message, mine, partnerId }: { message: Message; mine: boolean; partnerId: string }) {
   const read = message.read_by?.includes(partnerId);
-  const time = new Date(message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  // Format in the browser only: the server's locale and time zone differ from
+  // the reader's, which showed wrong times and broke hydration.
+  const [time, setTime] = useState('');
+  useEffect(() => {
+    setTime(new Date(message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }));
+  }, [message.created_at]);
 
   return (
     <motion.div
@@ -25,8 +31,8 @@ export function MessageBubble({ message, mine, partnerId }: { message: Message; 
         )}
       >
         <p className="whitespace-pre-wrap break-words">{message.text}</p>
-        <p className={cn('mt-1 flex items-center justify-end gap-1 text-[11px]', mine ? 'text-paper/70' : 'text-paper/45')}>
-          {time}
+        <p className={cn('mt-1 flex h-4 items-center justify-end gap-1 text-[11px]', mine ? 'text-paper/70' : 'text-paper/60')}>
+          <time dateTime={message.created_at}>{time}</time>
           {mine &&
             (message.pending ? (
               <Clock className="h-3 w-3" aria-label="Sending" />

@@ -19,7 +19,7 @@ export function ChatTimer({ started, remaining, fraction, waitingFor }: { starte
         <span className={cn('font-semibold', urgent ? 'text-[#E58A7F]' : 'text-paper/65')}>
           {!started ? waitingFor ?? 'Clock starts when you both say hi' : remaining === 0 ? 'Chat closed' : (
             <>
-              Chat closes in <span className="tabular font-bold text-paper">{fmt(remaining!)}</span>
+              Chat closes in <span className="tabular font-bold text-paper">{remaining === null ? '–:––' : fmt(remaining)}</span>
             </>
           )}
         </span>

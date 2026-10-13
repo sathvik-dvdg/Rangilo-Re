@@ -1,25 +1,39 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { X } from 'lucide-react';
+import { useFocusTrap } from '@/hooks/useFocusTrap';
 
 export function BottomSheet({ open, onClose, children }: { open: boolean; onClose: () => void; children: React.ReactNode }) {
+  const sheet = useRef<HTMLDivElement>(null);
+  useFocusTrap(sheet, open);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
   return (
     <AnimatePresence>
       {open && (
         <motion.div className="fixed inset-0 z-[70] flex items-end justify-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
           <button aria-label="Close" className="absolute inset-0 bg-ink/75" onClick={onClose} />
           <motion.div
+            ref={sheet}
+            tabIndex={-1}
             role="dialog"
             aria-modal
             initial={{ y: '100%' }}
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
             transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-            className="grain relative w-full max-w-lg rounded-t-2xl border border-b-0 border-haldi/25 bg-ink-2 px-6 pb-8 pt-3"
+            className="grain relative max-h-[90dvh] w-full outline-none max-w-lg overflow-y-auto rounded-t-2xl border border-b-0 border-haldi/25 bg-ink-2 px-6 pb-[max(2rem,env(safe-area-inset-bottom))] pt-3"
           >
             <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-paper/20" />
-            <button onClick={onClose} aria-label="Close" className="absolute right-4 top-4 rounded-full p-1.5 text-paper/50 hover:bg-paper/5 hover:text-paper">
+            <button onClick={onClose} aria-label="Close" className="absolute right-3 top-3 flex h-11 w-11 items-center justify-center rounded-full text-paper/60 hover:bg-paper/5 hover:text-paper">
               <X className="h-5 w-5" />
             </button>
             {children}

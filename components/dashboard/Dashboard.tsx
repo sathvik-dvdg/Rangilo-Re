@@ -7,6 +7,7 @@ import { motion } from 'framer-motion';
 import { FixedSizeList, type ListChildComponentProps } from 'react-window';
 import { Search } from 'lucide-react';
 import { Avatar } from '@/components/ui/Avatar';
+import { Button } from '@/components/ui/button';
 import { GenderBadge } from '@/components/ui/GenderBadge';
 import { OnboardingModal } from './OnboardingModal';
 import { useLobbyPresence } from '@/hooks/useLobbyPresence';
@@ -62,11 +63,14 @@ export function Dashboard({ me, suggestedName }: { me: PublicProfile | null; sug
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
+  const [attempt, setAttempt] = useState(0);
 
   useLobbyPresence(me ? userId ?? null : null);
 
   useEffect(() => {
     if (!me) return;
+    setError(null);
+    setUsers(null);
     fetch('/api/users')
       .then(async (r) => {
         const d = await r.json().catch(() => ({}));
@@ -74,7 +78,7 @@ export function Dashboard({ me, suggestedName }: { me: PublicProfile | null; sug
         setUsers(d.users);
       })
       .catch((e: Error) => setError(e.message || 'Could not load dancers. Try again in a moment.'));
-  }, [me]);
+  }, [me, attempt]);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -137,17 +141,21 @@ export function Dashboard({ me, suggestedName }: { me: PublicProfile | null; sug
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
+                aria-label="Search by nickname"
+                autoComplete="off"
+                enterKeyHint="search"
                 placeholder="Search by nickname"
                 className="w-full bg-transparent text-[15px] text-paper placeholder:text-paper/35 focus:outline-none"
               />
             </label>
-            <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+            <div role="group" aria-label="Filter dancers" className="mt-4 flex gap-2 overflow-x-auto pb-1">
               {FILTERS.map((f) => (
                 <button
                   key={f.id}
                   onClick={() => setFilter(f.id)}
+                  aria-pressed={filter === f.id}
                   className={cn(
-                    'shrink-0 rounded-full border px-4 py-1.5 text-sm font-semibold transition-colors',
+                    'h-11 shrink-0 rounded-full border px-4 text-sm font-semibold transition-colors',
                     filter === f.id ? 'border-haldi bg-haldi text-ink' : 'border-paper/15 text-paper/70 hover:border-paper/40',
                   )}
                 >
@@ -159,7 +167,12 @@ export function Dashboard({ me, suggestedName }: { me: PublicProfile | null; sug
 
           <div ref={listWrap} className="mx-auto mt-3 w-full max-w-3xl flex-1 overflow-hidden px-3 sm:px-5">
             {error ? (
-              <p className="p-6 text-paper/60">{error}</p>
+              <div role="alert" className="flex flex-col items-start gap-4 p-6 text-paper/75">
+                <p>{error}</p>
+                <Button variant="outline" onClick={() => setAttempt((n) => n + 1)}>
+                  Try again
+                </Button>
+              </div>
             ) : users === null ? (
               <div className="space-y-3 p-2">
                 {Array.from({ length: 6 }).map((_, i) => (

@@ -1,3 +1,4 @@
+import { billingDisabledResponse } from '@/lib/billing';
 import { razorpay } from '@/lib/razorpay';
 import { PRICE_PAISE, partnerFromRoomId } from '@/lib/room';
 import { HttpError, errorResponse, getProfile, getRevealed, requireUserId } from '@/lib/server';
@@ -8,6 +9,10 @@ export const runtime = 'nodejs';
 export async function POST(req: Request) {
   try {
     const userId = requireUserId();
+    // Before touching the body, the database or Razorpay (FREE-004).
+    const disabled = billingDisabledResponse();
+    if (disabled) return disabled;
+
     const body = (await req.json().catch(() => ({}))) as {
       type?: string;
       targetUserId?: string;

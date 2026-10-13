@@ -1,3 +1,4 @@
+import { billingDisabledResponse } from '@/lib/billing';
 import { fulfill, parseNotes } from '@/lib/payments';
 import { razorpay, verifyCheckoutSignature } from '@/lib/razorpay';
 import { HttpError, errorResponse, getRevealed, requireUserId } from '@/lib/server';
@@ -7,6 +8,10 @@ export const runtime = 'nodejs';
 export async function POST(req: Request) {
   try {
     const userId = requireUserId();
+    // Before touching the body, the database or Razorpay (FREE-004).
+    const disabled = billingDisabledResponse();
+    if (disabled) return disabled;
+
     const { orderId, paymentId, signature } = (await req.json().catch(() => ({}))) as Record<string, string>;
     if (!orderId || !paymentId || !signature) throw new HttpError(400, 'Missing payment fields');
 
