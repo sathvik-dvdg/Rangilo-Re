@@ -9,6 +9,7 @@ import { Search } from 'lucide-react';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/button';
 import { GenderBadge } from '@/components/ui/GenderBadge';
+import { CampusEnergyBattle } from './CampusEnergyBattle';
 import { OnboardingModal } from './OnboardingModal';
 import { useLobbyPresence } from '@/hooks/useLobbyPresence';
 import { useAppStore } from '@/store/useAppStore';
@@ -58,6 +59,11 @@ function Row({ index, style, data }: ListChildComponentProps<RowData>) {
               </span>
             )}
             <GenderBadge gender={u.gender} />
+            {(u.branch || u.college_year) && (
+              <span className="rounded bg-paper/10 px-1.5 py-0.5 text-[10px] font-semibold text-paper/70">
+                {u.branch || 'CSE'} · {u.college_year ? u.college_year.replace(' Year', ' Yr') : '3rd Yr'}
+              </span>
+            )}
           </div>
           <p className={cn('mt-1 text-xs truncate', online ? 'text-[#9CC587]' : 'text-paper/45')}>
             {unlocked?.email ? (
@@ -145,6 +151,11 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
                 <div className="flex items-center gap-2">
                   <p className="truncate font-display text-lg text-haldi">{me.display_name}</p>
                   <GenderBadge gender={me.gender} />
+                  {(me.branch || me.college_year) && (
+                    <span className="rounded bg-paper/10 px-2 py-0.5 text-[11px] font-bold text-paper/80">
+                      {me.branch || 'CSE'} · {me.college_year ? me.college_year.replace(' Year', ' Yr') : '3rd Yr'}
+                    </span>
+                  )}
                   <button
                     type="button"
                     onClick={() => setEditOpen(true)}
@@ -167,6 +178,8 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
               </div>
             </div>
           </div>
+
+          <CampusEnergyBattle users={users} onlineIds={onlineIds} me={me} />
 
           <div className="mx-auto w-full max-w-3xl px-4 pt-5 sm:px-6">
             <label className="flex h-11 items-center gap-3 rounded-full border border-paper/15 bg-ink-2 px-4 focus-within:border-haldi">
@@ -235,6 +248,8 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
         initialGender={me?.gender}
         initialRealName={me?.real_name ?? ''}
         initialEmail={me?.email ?? ''}
+        initialBranch={me?.branch}
+        initialCollegeYear={me?.college_year}
         onDone={() => {
           setEditOpen(false);
           router.refresh();

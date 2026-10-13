@@ -29,6 +29,8 @@ export async function completeOnboarding(input: {
   displayName: string;
   realName?: string;
   email?: string;
+  branch?: string;
+  collegeYear?: string;
 }) {
   const { userId } = auth();
   if (!userId) return { error: 'Sign in first' };
@@ -53,18 +55,28 @@ export async function completeOnboarding(input: {
     return { error: 'Please enter a valid email address.' };
   }
 
-  const { error } = await supabaseAdmin().from('users').upsert(
-    {
-      clerk_id: userId,
-      display_name: cleanDisplayName,
-      gender: input.gender,
-      real_name: realName,
-      email,
-      is_online: true,
-      last_seen: new Date().toISOString(),
-    },
-    { onConflict: 'clerk_id' },
-  );
+  const branch = (input.branch || 'CSE').trim();
+  const collegeYear = (input.collegeYear || '3rd Year').trim();
+
+  const userPayload: Record<string, unknown> = {
+    clerk_id: userId,
+    display_name: cleanDisplayName,
+    gender: input.gender,
+    real_name: realName,
+    email,
+    branch,
+    college_year: collegeYear,
+    is_online: true,
+    last_seen: new Date().toISOString(),
+  };
+
+  let { error } = await supabaseAdmin().from('users').upsert(userPayload, { onConflict: 'clerk_id' });
+  if (error && error.message?.includes('branch')) {
+    delete userPayload.branch;
+    delete userPayload.college_year;
+    const retry = await supabaseAdmin().from('users').upsert(userPayload, { onConflict: 'clerk_id' });
+    error = retry.error;
+  }
   if (error) return { error: 'Could not save your profile. Try again.' };
 
   revalidatePath('/dashboard');

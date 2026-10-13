@@ -4,6 +4,8 @@ export type PublicProfile = {
   clerk_id: string;
   display_name: string;
   gender: Gender;
+  branch?: string;
+  college_year?: string;
   last_seen: string;
 };
 

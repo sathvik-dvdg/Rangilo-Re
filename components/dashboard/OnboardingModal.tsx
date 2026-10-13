@@ -17,12 +17,17 @@ const GENDERS: { id: Gender; label: string }[] = [
   { id: 'other', label: 'Other' },
 ];
 
+const BRANCHES = ['CSE', 'ISE', 'AIML', 'ECE', 'MECH', 'CIVIL', 'AIDS'];
+const YEARS = ['1st Year', '2nd Year', '3rd Year', '4th Year'];
+
 export function OnboardingModal({
   open,
   suggestedName,
   initialGender = null,
   initialRealName = '',
   initialEmail = '',
+  initialBranch = 'CSE',
+  initialCollegeYear = '3rd Year',
   onDone,
   onClose,
 }: {
@@ -31,6 +36,8 @@ export function OnboardingModal({
   initialGender?: Gender | null;
   initialRealName?: string;
   initialEmail?: string;
+  initialBranch?: string;
+  initialCollegeYear?: string;
   onDone: () => void;
   onClose?: () => void;
 }) {
@@ -40,6 +47,8 @@ export function OnboardingModal({
   const [name, setName] = useState(suggestedName);
   const [realName, setRealName] = useState(initialRealName);
   const [email, setEmail] = useState(initialEmail);
+  const [branch, setBranch] = useState(initialBranch || 'CSE');
+  const [collegeYear, setCollegeYear] = useState(initialCollegeYear || '3rd Year');
   const [photo, setPhoto] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -59,9 +68,11 @@ export function OnboardingModal({
       if (suggestedName) setName(suggestedName);
       if (initialRealName) setRealName(initialRealName);
       if (initialEmail) setEmail(initialEmail);
+      if (initialBranch) setBranch(initialBranch);
+      if (initialCollegeYear) setCollegeYear(initialCollegeYear);
       setError(null);
     }
-  }, [open, initialGender, suggestedName, initialRealName, initialEmail]);
+  }, [open, initialGender, suggestedName, initialRealName, initialEmail, initialBranch, initialCollegeYear]);
 
   useEffect(() => {
     if (user && !isEditing) {
@@ -105,6 +116,8 @@ export function OnboardingModal({
         displayName: name.trim(),
         realName: realName.trim(),
         email: email.trim(),
+        branch,
+        collegeYear,
       });
       if ('error' in res && res.error) {
         setError(res.error);
@@ -251,6 +264,56 @@ export function OnboardingModal({
                       <p className="mt-1 text-[11px] text-paper/50">
                         Type any name of your choice, or tap Reroll for an authentic festive nickname.
                       </p>
+                    </div>
+
+                    {/* Department / Branch & College Year */}
+                    <div className="mt-5">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold uppercase tracking-wider text-haldi">
+                          Department & Year
+                        </label>
+                        <span className="text-[11px] text-paper/50">Powers Campus Energy Battle 🔥</span>
+                      </div>
+
+                      {/* Branch selector */}
+                      <p className="mt-2 text-[11px] font-semibold text-paper/70 uppercase tracking-wider">Branch</p>
+                      <div className="mt-1 flex flex-wrap gap-1.5">
+                        {BRANCHES.map((b) => (
+                          <button
+                            key={b}
+                            type="button"
+                            onClick={() => setBranch(b)}
+                            className={cn(
+                              'rounded-lg px-2.5 py-1 text-xs font-bold transition-all',
+                              branch === b
+                                ? 'bg-haldi text-ink shadow-sm'
+                                : 'border border-paper/15 bg-ink text-paper/70 hover:border-paper/40'
+                            )}
+                          >
+                            {b}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Year selector */}
+                      <p className="mt-2.5 text-[11px] font-semibold text-paper/70 uppercase tracking-wider">College Year</p>
+                      <div className="mt-1 grid grid-cols-4 gap-1.5">
+                        {YEARS.map((y) => (
+                          <button
+                            key={y}
+                            type="button"
+                            onClick={() => setCollegeYear(y)}
+                            className={cn(
+                              'rounded-lg py-1 text-center text-xs font-bold transition-all',
+                              collegeYear === y
+                                ? 'bg-kumkum text-paper shadow-sm'
+                                : 'border border-paper/15 bg-ink text-paper/70 hover:border-paper/40'
+                            )}
+                          >
+                            {y.replace(' Year', ' Yr')}
+                          </button>
+                        ))}
+                      </div>
                     </div>
 
                     {/* Private Details Box */}

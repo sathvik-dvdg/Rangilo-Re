@@ -7,6 +7,9 @@ import type { MyProfile, PublicProfile, RoomState } from './types';
 export const PUBLIC_COLUMNS = 'clerk_id, display_name, gender, last_seen';
 export const OWN_COLUMNS = 'clerk_id, display_name, gender, last_seen, real_name, email';
 
+export const CAMPUS_PUBLIC_COLUMNS = 'clerk_id, display_name, gender, branch, college_year, last_seen';
+export const CAMPUS_OWN_COLUMNS = 'clerk_id, display_name, gender, branch, college_year, last_seen, real_name, email';
+
 export class HttpError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -28,20 +31,36 @@ export function errorResponse(e: unknown) {
 export async function getProfile(clerkId: string): Promise<PublicProfile | null> {
   const { data, error } = await supabaseAdmin()
     .from('users')
-    .select(PUBLIC_COLUMNS)
+    .select(CAMPUS_PUBLIC_COLUMNS)
     .eq('clerk_id', clerkId)
     .maybeSingle();
-  if (error) throw error;
+  if (error) {
+    const fallback = await supabaseAdmin()
+      .from('users')
+      .select(PUBLIC_COLUMNS)
+      .eq('clerk_id', clerkId)
+      .maybeSingle();
+    if (fallback.error) throw fallback.error;
+    return fallback.data as PublicProfile | null;
+  }
   return data as PublicProfile | null;
 }
 
 export async function getMyProfile(clerkId: string): Promise<MyProfile | null> {
   const { data, error } = await supabaseAdmin()
     .from('users')
-    .select(OWN_COLUMNS)
+    .select(CAMPUS_OWN_COLUMNS)
     .eq('clerk_id', clerkId)
     .maybeSingle();
-  if (error) throw error;
+  if (error) {
+    const fallback = await supabaseAdmin()
+      .from('users')
+      .select(OWN_COLUMNS)
+      .eq('clerk_id', clerkId)
+      .maybeSingle();
+    if (fallback.error) throw fallback.error;
+    return fallback.data as MyProfile | null;
+  }
   return data as MyProfile | null;
 }
 
