@@ -7,6 +7,11 @@ export type PublicProfile = {
   last_seen: string;
 };
 
+export type MyProfile = PublicProfile & {
+  real_name: string;
+  email: string;
+};
+
 export type Message = {
   id: string;
   room_id: string;
