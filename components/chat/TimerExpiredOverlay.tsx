@@ -1,8 +1,7 @@
 'use client';
 
 import { AnimatePresence, motion } from 'framer-motion';
-import Link from 'next/link';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { Button } from '@/components/ui/button';
 
 export function Diya({ className }: { className?: string }) {
   return (
@@ -18,8 +17,8 @@ export function Diya({ className }: { className?: string }) {
   );
 }
 
-/** Without onExtend (Free Mode) there is no paid option, just a way back to the dancer list. */
-export function TimerExpiredOverlay({ show, onExtend }: { show: boolean; onExtend?: () => void }) {
+/** Paid Mode only: offers the extension. Free Mode shows a closed-chat panel in ChatRoom instead. */
+export function TimerExpiredOverlay({ show, onExtend }: { show: boolean; onExtend: () => void }) {
   return (
     <AnimatePresence>
       {show && (
@@ -34,21 +33,10 @@ export function TimerExpiredOverlay({ show, onExtend }: { show: boolean; onExten
               <Diya className="h-16 w-16" />
             </motion.div>
             <h2 className="mt-4 font-display text-3xl text-paper">Time&apos;s Up! 🪔</h2>
-            {onExtend ? (
-              <>
-                <p className="mt-2 text-paper/70">Your free 2-minute chat has ended. Continue dancing together?</p>
-                <Button variant="haldi" size="lg" className="mt-6 w-full" onClick={onExtend}>
-                  Extend Chat ₹29 →
-                </Button>
-              </>
-            ) : (
-              <>
-                <p className="mt-2 text-paper/70">Your 2-minute chat has ended. Your messages are still here to read.</p>
-                <Link href="/dashboard" className={buttonVariants({ variant: 'haldi', size: 'lg', className: 'mt-6 w-full' })}>
-                  Back to dancers
-                </Link>
-              </>
-            )}
+            <p className="mt-2 text-paper/70">Your free 2-minute chat has ended. Continue dancing together?</p>
+            <Button variant="haldi" size="lg" className="mt-6 w-full" onClick={onExtend}>
+              Extend Chat ₹29 →
+            </Button>
           </motion.div>
         </motion.div>
       )}

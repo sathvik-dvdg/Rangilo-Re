@@ -186,7 +186,7 @@ Classification of what exists today. "Implemented — unverified" means the code
 - **Status:** Partial — see CHAT-003, CHAT-004.
 - **Depends on:** DEC-001 (what happens at expiry in Free Mode).
 - **Acceptance:** See CHAT-003/CHAT-004.
-- **Evidence:** See CHAT-003/CHAT-004.
+- **Evidence:** See CHAT-003/CHAT-004. Expiry enforcement on send (403 after 120 s plus granted extensions, nothing written) is covered at route level by `tests/chat-expiry.test.ts` (database mocked), passing locally 2026-10-13.
 - **Risks:** —
 
 ---
@@ -298,7 +298,7 @@ Classification of what exists today. "Implemented — unverified" means the code
 - **Requirement (DEC-001 decided 2026-10-13):** When a Free Mode chat expires, the history stays readable and each participant may choose "keep talking". The server grants +2 minutes only once **both** participants have agreed for that expiry; either may decline, and a decline or no response leaves the chat closed. Extension requests and agreements are recorded server-side and are free.
 - **Why:** The current overlay's only action is a ₹29 payment; extending a conversation with someone needs both people's agreement.
 - **Files:** `components/chat/TimerExpiredOverlay.tsx`, `ChatRoom.tsx`; server grant should reuse `chat_extensions` with a non-payment source (new migration, DATA-001).
-- **Status:** Missing.
+- **Status:** Missing (the mutual extension is not built). Interim closed state, 2026-10-13: when a Free Mode chat expires the thread stays readable and scrollable, the composer is replaced by a "Time's up" panel with "Back to dancers" (`components/chat/ChatRoom.tsx`), and the server refuses further messages (`tests/chat-expiry.test.ts`, `tests/smoke/free-mode.test.ts`).
 - **Depends on:** FREE-003, DATA-001. Open: limit on the number of free extensions per room; whether a one-sided request expires.
 - **Acceptance:** Tests: one agreement → no extra time; both agree → exactly +120 s, granted once even under concurrent requests; a request by a non-participant → 403; decline → chat remains closed; no paid affordance.
 - **Evidence:** TEST-003, TEST-007.
@@ -995,7 +995,7 @@ Status abbreviations: **V** Verified (scope in brackets, e.g. unit/route level) 
 |---|---|---|---|---|---|---|
 | CORE-001 | Free Mode default, fully functional | app-wide | P | in-process smoke | Landing copy; browser-level smoke | FREE-003, DEC-008 |
 | CORE-002 | Server authoritative | `lib/server.ts`, `app/api/**` | P | TEST-003 | Fix CHAT-003 | PRIV-005 |
-| CORE-003 | Two-minute rule | `lib/room.ts`, `timer/route.ts` | P | TEST-003 | See CHAT-003/004 | DEC-001 |
+| CORE-003 | Two-minute rule | `lib/room.ts`, `timer/route.ts`, `messages/route.ts` | P | `tests/chat-expiry.test.ts` (expiry on send) | See CHAT-003/004 | DEC-001 |
 | CFG-001 | `BILLING_MODE` resolution | `lib/billing.ts` | V (unit) | `tests/billing.test.ts` | Run in CI | TEST-006 |
 | CFG-002 | Paid fails closed | `lib/billing.ts`, `lib/razorpay.ts` | P | `tests/billing.test.ts`, `tests/payment-routes.test.ts` | Stricter live-key environment check | DEP-001 |
 | CFG-003 | Credentials ≠ paid | `lib/billing.ts`, payment routes | V (route) | `tests/payment-routes.test.ts`, `tests/smoke/free-mode.test.ts` | Browser-level check | — |
@@ -1005,7 +1005,7 @@ Status abbreviations: **V** Verified (scope in brackets, e.g. unit/route level) 
 | FREE-002 | No gateway contact | `useRazorpay.ts`, `lib/razorpay.ts` | IU | `razorpay()` refusal; smoke asserts no SDK/fetch | Browser network capture | — |
 | FREE-003 | No paid UI/claims | chat (done), landing (not) | P | smoke (chat) | Landing copy | DEC-008, PRIV-006 |
 | FREE-004 | Billing endpoints inert; webhook grants only verified paid-era ledger orders | `app/api/payment/*`, webhook | P | `tests/payment-routes.test.ts`, smoke | Continuity path after ledger (FU-001) | PAY-003/006/011 |
-| FREE-005 | Free mutual +2 min extension at expiry | `TimerExpiredOverlay.tsx` | M | TEST-003, TEST-007 | Build mutual-agreement flow | DATA-001; cap open |
+| FREE-005 | Free mutual +2 min extension at expiry | `ChatRoom.tsx` (interim closed panel) | M | smoke + `tests/chat-expiry.test.ts` (closed state only) | Build mutual-agreement flow | DATA-001; cap open |
 | FREE-006 | Free identity sharing via consent | — | M | TEST-003 | Build with ID-004 | ID-001…004 |
 | FREE-007 | Non-destructive switching | `extraSecondsFor` | IU | integration test | Write test | DEC-003 |
 | FREE-008 | Config ≠ approval | process | M | change record | Adopt §20 | GATE-* |

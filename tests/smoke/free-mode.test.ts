@@ -112,15 +112,24 @@ describe('Free Mode smoke (in-process, providers mocked)', () => {
     room.state = roomState(null);
     const html = await renderChat();
     expect(html).toContain('GarbaKing_Arjun_7302');
+    expect(html).toContain('aria-label="Message"'); // the composer is there while the chat is open
     for (const pattern of PAYMENT_UI) expect(html).not.toMatch(pattern);
   });
 
   it('expired chat offers no paid extension, only a way back', async () => {
-    room.state = roomState(new Date(Date.now() - 60 * 60 * 1000).toISOString());
+    const started = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    room.state = {
+      ...roomState(started),
+      messages: [{ id: 'm1', room_id: ROOM, sender_id: 'user_bob', text: 'That is me', created_at: started, read_by: ['user_bob'] }],
+    };
     const html = await renderChat();
     expect(html).toContain('Your 2-minute chat has ended');
     expect(html).toContain('Back to dancers');
     for (const pattern of PAYMENT_UI) expect(html).not.toMatch(pattern);
+    // Readable, not writable: the composer is gone, not merely disabled.
+    expect(html).not.toContain('<form');
+    expect(html).not.toContain('aria-label="Message"');
+    expect(html).toContain('That is me'); // the thread itself is still rendered
   });
 
   it('payment creation is refused before any database or Razorpay access', async () => {

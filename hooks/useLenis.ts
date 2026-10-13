@@ -7,7 +7,8 @@ import { ScrollTrigger } from 'gsap/ScrollTrigger';
 
 export function useLenis(enabled = true) {
   useEffect(() => {
-    if (!enabled) return;
+    // Smooth scrolling is motion too; keep native scrolling for reduced-motion users.
+    if (!enabled || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     gsap.registerPlugin(ScrollTrigger);
 
     const lenis = new Lenis({ lerp: 0.08, duration: 1.4 });

@@ -2,6 +2,7 @@
 
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
+import { SignedOut } from '@clerk/nextjs';
 import { motion } from 'framer-motion';
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -25,12 +26,12 @@ export function HeroSection() {
       />
 
       <div className="relative mx-auto grid max-w-6xl md:min-h-[calc(100vh-4rem)] md:grid-cols-[1.05fr_1fr] md:items-center">
-        <div className="relative order-2 px-4 pb-16 pt-6 sm:px-6 md:order-1 md:py-24">
+        <div className="relative order-2 px-4 pb-14 pt-4 sm:px-6 sm:pb-16 sm:pt-6 md:order-1 md:py-24">
           <motion.p
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.1, duration: 0.6 }}
-            className="mb-6 inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.25em] text-haldi"
+            className="mb-5 inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.25em] text-haldi"
           >
             <span className="h-px w-8 bg-haldi" /> Navratri · 9 nights
           </motion.p>
@@ -60,7 +61,7 @@ export function HeroSection() {
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.75, duration: 0.6, ease }}
-            className="mt-6 max-w-md text-lg leading-relaxed text-paper/75"
+            className="mt-5 max-w-md text-base leading-relaxed text-paper/75 sm:mt-6 sm:text-lg"
           >
             See who else is at the garba, say hello under a nickname, and get two minutes to find out if
             you dance well together. Your real name stays yours until someone pays to ask for it.
@@ -70,18 +71,24 @@ export function HeroSection() {
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.9, duration: 0.6, ease }}
-            className="mt-9 flex flex-wrap items-center gap-4"
+            className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-2 sm:mt-9"
           >
             <Link href="/sign-up" className={buttonVariants({ size: 'lg' })}>
               Join Navratri
             </Link>
-            <Link href="#how" className="text-sm font-semibold text-paper/70 underline decoration-haldi/60 underline-offset-4 hover:text-paper">
+            <Link href="#how" className="inline-flex h-11 items-center text-sm font-semibold text-paper/75 underline decoration-haldi/60 underline-offset-4 hover:text-paper">
               How it works
             </Link>
+            {/* The navbar has no room for Sign in on phones; returning dancers get it here. */}
+            <SignedOut>
+              <Link href="/sign-in" className="inline-flex h-11 items-center text-sm font-semibold text-paper/75 underline decoration-haldi/60 underline-offset-4 hover:text-paper sm:hidden">
+                Sign in
+              </Link>
+            </SignedOut>
           </motion.div>
         </div>
 
-        <div className="relative order-1 h-[50vh] md:order-2 md:h-[80vh]">
+        <div className="relative order-1 h-[30vh] min-h-[190px] max-h-[340px] md:order-2 md:h-[80vh] md:max-h-none">
           <MandalaScene />
         </div>
       </div>

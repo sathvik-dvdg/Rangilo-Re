@@ -31,7 +31,7 @@ export function MessageBubble({ message, mine, partnerId }: { message: Message; 
         )}
       >
         <p className="whitespace-pre-wrap break-words">{message.text}</p>
-        <p className={cn('mt-1 flex h-4 items-center justify-end gap-1 text-[11px]', mine ? 'text-paper/70' : 'text-paper/45')}>
+        <p className={cn('mt-1 flex h-4 items-center justify-end gap-1 text-[11px]', mine ? 'text-paper/70' : 'text-paper/60')}>
           <time dateTime={message.created_at}>{time}</time>
           {mine &&
             (message.pending ? (

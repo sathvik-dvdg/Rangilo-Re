@@ -13,6 +13,9 @@ export const clerkAppearance = {
   elements: {
     card: { border: '1px solid rgba(216,162,58,0.25)', boxShadow: 'none' },
     headerTitle: { fontFamily: 'var(--font-cinzel)', letterSpacing: '0.04em' },
-    formButtonPrimary: { textTransform: 'none', fontWeight: 700 },
+    formButtonPrimary: { textTransform: 'none', fontWeight: 700, minHeight: '44px' },
+    // 44px touch targets on phones.
+    socialButtonsBlockButton: { minHeight: '44px' },
+    formFieldInput: { minHeight: '44px' },
   },
 };

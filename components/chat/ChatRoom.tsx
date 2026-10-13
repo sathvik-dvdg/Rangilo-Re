@@ -17,6 +17,7 @@ import { useRoomRealtime } from '@/hooks/useSupabaseRealtime';
 import { useChatTimer } from '@/hooks/useChatTimer';
 import { useRazorpay } from '@/hooks/useRazorpay';
 import { useAppStore } from '@/store/useAppStore';
+import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { Message, RoomState } from '@/lib/types';
 
@@ -37,6 +38,8 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
   const { pay, busy, error: payError, clearError } = useRazorpay();
 
   const timer = useChatTimer(timerStartedAt, extraSeconds, renderedAt);
+  // Free Mode has no extension, so a closed chat stays readable instead of blurring behind an overlay.
+  const closedFree = timer.expired && !billingEnabled;
 
   const refresh = useCallback(async () => {
     const res = await fetch(`/api/rooms/${encodeURIComponent(roomId)}`);
@@ -171,7 +174,7 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
     <main className="flex h-[100dvh] flex-col bg-ink">
       <header className="z-30 bg-ink-2">
         <div className="flex items-center gap-3 px-2 py-3 sm:px-4">
-          <Link href="/dashboard" aria-label="Back to dancers" className="rounded-full p-2 text-paper/70 hover:bg-paper/5 hover:text-paper">
+          <Link href="/dashboard" aria-label="Back to dancers" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-paper/70 hover:bg-paper/5 hover:text-paper">
             <ChevronLeft className="h-6 w-6" />
           </Link>
           <Avatar name={partner.display_name} size={40} online={partnerHere} />
@@ -179,7 +182,7 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
             <p className="truncate font-display text-[15px] text-paper">{partner.display_name}</p>
             <div className="mt-0.5 flex items-center gap-2">
               <GenderBadge gender={partner.gender} />
-              <span className="text-xs text-paper/45">{partnerHere ? 'in the room' : 'away'}</span>
+              <span className="text-xs text-paper/60">{partnerHere ? 'in the room' : 'away'}</span>
             </div>
           </div>
           {billingEnabled && !revealed && (
@@ -193,7 +196,7 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
       </header>
 
       <div className="relative flex-1 overflow-hidden">
-        <div className={cn('bandhani h-full overflow-y-auto px-4 py-5 transition-[filter] duration-500', timer.expired && 'pointer-events-none blur-[3px]')}>
+        <div className={cn('bandhani h-full overflow-y-auto px-4 py-5 transition-[filter] duration-500', timer.expired && billingEnabled && 'pointer-events-none blur-[3px]')}>
           <div className="mx-auto flex max-w-2xl flex-col gap-2">
             {messages.length === 0 && (
               <div className="mx-auto my-10 max-w-xs rounded-lg stitch bg-ink-2 p-5 text-center">
@@ -207,10 +210,26 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
             <div ref={bottom} />
           </div>
         </div>
-        <TimerExpiredOverlay show={timer.expired && sheet === null} onExtend={billingEnabled ? () => openSheet('extend') : undefined} />
+        {billingEnabled && <TimerExpiredOverlay show={timer.expired && sheet === null} onExtend={() => openSheet('extend')} />}
       </div>
 
-      <form onSubmit={send} className={cn('border-t border-paper/10 bg-ink-2 px-3 py-3 transition-[filter,opacity]', timer.expired && 'opacity-50 blur-[1px]')}>
+      {closedFree ? (
+        <div role="status" className="border-t border-paper/10 bg-ink-2 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4">
+          <div className="mx-auto flex max-w-2xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-display text-lg text-paper">Time&apos;s up</p>
+              <p className="text-sm text-paper/70">Your 2-minute chat has ended. Your messages are still here to read.</p>
+            </div>
+            <Link href="/dashboard" className={buttonVariants({ variant: 'haldi', className: 'w-full shrink-0 sm:w-auto' })}>
+              Back to dancers
+            </Link>
+          </div>
+        </div>
+      ) : (
+      <form
+        onSubmit={send}
+        className={cn('border-t border-paper/10 bg-ink-2 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 transition-[filter,opacity]', timer.expired && 'opacity-50 blur-[1px]')}
+      >
         {sendError && <p className="mx-auto mb-2 max-w-2xl px-2 text-xs text-[#E58A7F]">{sendError}</p>}
         <div className="mx-auto flex max-w-2xl items-center gap-2">
           <input
@@ -218,6 +237,9 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
             onChange={(e) => setText(e.target.value)}
             disabled={timer.expired}
             maxLength={1000}
+            aria-label="Message"
+            autoComplete="off"
+            enterKeyHint="send"
             placeholder={timer.expired ? 'Chat closed' : 'Message'}
             className="h-12 flex-1 rounded-full border border-paper/15 bg-ink px-5 text-[15px] text-paper placeholder:text-paper/35 focus:border-haldi focus:outline-none disabled:cursor-not-allowed"
           />
@@ -232,6 +254,7 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
           </motion.button>
         </div>
       </form>
+      )}
 
       {billingEnabled && (
         <>
