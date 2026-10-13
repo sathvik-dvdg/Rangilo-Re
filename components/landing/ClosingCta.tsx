@@ -19,6 +19,9 @@ export function ClosingCta() {
             <Mark className="h-5 w-5" /> GarbaConnect
           </p>
           <p>Payments by Razorpay. Be kind on the floor and in the chat.</p>
+          <Link href="/refund-policy" className="underline underline-offset-4 hover:text-paper">
+            Refund Policy
+          </Link>
         </div>
       </footer>
     </>

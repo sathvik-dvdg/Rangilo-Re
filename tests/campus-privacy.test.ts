@@ -23,7 +23,7 @@ vi.mock('@/lib/supabaseAdmin', () => ({
 }));
 
 import { GET as getUsers } from '@/app/api/users/route';
-import { getRevealed } from '@/lib/server';
+import { getRevealedContact } from '@/lib/consent';
 import { completeOnboarding } from '@/app/(main)/dashboard/actions';
 
 describe('Campus Profiles & Privacy Rules', () => {
@@ -92,20 +92,14 @@ describe('Campus Profiles & Privacy Rules', () => {
     });
   });
 
-  describe('Pre-existing reveals rows (DEC-003)', () => {
-    it('never selects or returns instagram_handle for a reveals row (PRIV-001, ID-001)', async () => {
+  describe('Contact details after a mutual exchange (PRIV-001, ID-001)', () => {
+    const revealRow = (data: unknown) => ({
+      select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data, error: null }) }) }),
+    });
+
+    it('returns real_name and email only, and never selects instagram_handle', async () => {
       mocks.supabaseFrom.mockImplementation((table: string) => {
-        if (table === 'reveals') {
-          return {
-            select: () => ({
-              eq: () => ({
-                eq: () => ({
-                  maybeSingle: () => Promise.resolve({ data: { id: 'rev_1' }, error: null }),
-                }),
-              }),
-            }),
-          };
-        }
+        if (table === 'contact_reveals') return revealRow({ user_a_id: 'user_alice', user_b_id: 'user_bob' });
         if (table === 'users') {
           return {
             select: (cols: string) => {
@@ -114,14 +108,7 @@ describe('Campus Profiles & Privacy Rules', () => {
               expect(cols).toContain('email');
               return {
                 eq: () => ({
-                  single: () =>
-                    Promise.resolve({
-                      data: {
-                        real_name: 'Bob Sharma',
-                        email: 'bob@example.com',
-                      },
-                      error: null,
-                    }),
+                  maybeSingle: () => Promise.resolve({ data: { real_name: 'Bob Sharma', email: 'bob@example.com', instagram_handle: 'bob_insta' }, error: null }),
                 }),
               };
             },
@@ -130,32 +117,27 @@ describe('Campus Profiles & Privacy Rules', () => {
         return {};
       });
 
-      const identity = await getRevealed('user_alice', 'user_bob');
-      expect(identity).toEqual({
-        real_name: 'Bob Sharma',
-        email: 'bob@example.com',
-      });
+      const identity = await getRevealedContact('user_alice', 'user_bob');
+      // Even if the database returned more, only the two agreed fields leave this function.
+      expect(identity).toEqual({ real_name: 'Bob Sharma', email: 'bob@example.com' });
       expect(identity).not.toHaveProperty('instagram_handle');
     });
 
-    it('returns null when no reveal record exists', async () => {
-      mocks.supabaseFrom.mockImplementation((table: string) => {
-        if (table === 'reveals') {
-          return {
-            select: () => ({
-              eq: () => ({
-                eq: () => ({
-                  maybeSingle: () => Promise.resolve({ data: null, error: null }),
-                }),
-              }),
-            }),
-          };
-        }
-        return {};
-      });
+    it('returns null without a contact_reveals row, and never reads the users table or the old reveals table', async () => {
+      mocks.supabaseFrom.mockImplementation((table: string) => (table === 'contact_reveals' ? revealRow(null) : {}));
 
-      const identity = await getRevealed('user_alice', 'user_bob');
-      expect(identity).toBeNull();
+      expect(await getRevealedContact('user_alice', 'user_bob')).toBeNull();
+      expect(mocks.supabaseFrom).not.toHaveBeenCalledWith('users');
+      expect(mocks.supabaseFrom).not.toHaveBeenCalledWith('reveals');
+    });
+
+    it('returns null when the row found is not for exactly this pair', async () => {
+      mocks.supabaseFrom.mockImplementation((table: string) =>
+        table === 'contact_reveals' ? revealRow({ user_a_id: 'user_alice', user_b_id: 'user_carol' }) : {},
+      );
+
+      expect(await getRevealedContact('user_alice', 'user_bob')).toBeNull();
+      expect(mocks.supabaseFrom).not.toHaveBeenCalledWith('users');
     });
   });
 

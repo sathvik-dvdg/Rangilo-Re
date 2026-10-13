@@ -2,8 +2,9 @@ import 'server-only';
 import { auth } from '@clerk/nextjs/server';
 import { supabaseAdmin } from './supabaseAdmin';
 import { diagnoseDbError } from './dbDiagnosis';
+import { getRevealedContact, getRoomConsent, isMissingSchema } from './consent';
 import { FREE_CHAT_MS, partnerFromRoomId } from './room';
-import type { MyProfile, PublicProfile, RevealedIdentity, RoomState } from './types';
+import type { MyProfile, PublicProfile, RoomState } from './types';
 
 export const PUBLIC_COLUMNS = 'clerk_id, display_name, gender, last_seen';
 export const OWN_COLUMNS = 'clerk_id, display_name, gender, last_seen, real_name, email';
@@ -107,23 +108,29 @@ export async function loadRoom(roomId: string, userId: string) {
   distinct.add(userId);
   if (distinct.size > 2) throw new HttpError(403, 'Room is full');
 
-  let { data: room, error: rErr } = await db
-    .from('rooms')
-    .select('id, participant_ids, timer_started_at')
-    .eq('id', roomId)
-    .maybeSingle();
-  if (rErr) throw rErr;
-  if (!room) {
-    const ins = await db
-      .from('rooms')
-      .upsert({ id: roomId, participant_ids: [userId, partnerId].sort() }, { onConflict: 'id' })
-      .select('id, participant_ids, timer_started_at')
-      .single();
-    if (ins.error) throw ins.error;
-    room = ins.data;
-  }
+  const room = await findOrCreateRoom(roomId, [userId, partnerId].sort());
+  return { db, me, partner, partnerId, room };
+}
 
-  return { db, me, partner, partnerId, room: room as { id: string; timer_started_at: string | null } };
+type RoomRow = { id: string; timer_started_at: string | null; unlimited: boolean };
+
+const ROOM_COLUMNS = 'id, participant_ids, timer_started_at, unlimited';
+const ROOM_COLUMNS_BEFORE_0006 = 'id, participant_ids, timer_started_at';
+
+async function findOrCreateRoom(roomId: string, participantIds: string[], columns = ROOM_COLUMNS): Promise<RoomRow> {
+  const db = supabaseAdmin();
+  const found = await db.from('rooms').select(columns).eq('id', roomId).maybeSingle();
+  const result =
+    found.error || found.data
+      ? found
+      : await db.from('rooms').upsert({ id: roomId, participant_ids: participantIds }, { onConflict: 'id' }).select(columns).single();
+  if (result.error) {
+    // rooms.unlimited arrives with migration 0006. Without it no room is unlimited.
+    if (columns === ROOM_COLUMNS && isMissingSchema(result.error)) return findOrCreateRoom(roomId, participantIds, ROOM_COLUMNS_BEFORE_0006);
+    throw result.error;
+  }
+  const row = result.data as unknown as { id: string; timer_started_at: string | null; unlimited?: boolean };
+  return { id: row.id, timer_started_at: row.timer_started_at, unlimited: row.unlimited === true };
 }
 
 export async function extraSecondsFor(roomId: string) {
@@ -132,35 +139,17 @@ export async function extraSecondsFor(roomId: string) {
   return (data ?? []).reduce((sum, r) => sum + (r.extra_seconds as number), 0);
 }
 
-export function isExpired(timerStartedAt: string | null, extraSeconds: number) {
-  if (!timerStartedAt) return false;
+/** A room that has been paid for is unlimited and never expires. */
+export function isExpired(timerStartedAt: string | null, extraSeconds: number, unlimited = false) {
+  if (unlimited || !timerStartedAt) return false;
   return Date.now() - new Date(timerStartedAt).getTime() >= FREE_CHAT_MS + extraSeconds * 1000;
-}
-
-export async function getRevealed(payerId: string, targetId: string): Promise<RevealedIdentity | null> {
-  const db = supabaseAdmin();
-  const { data: reveal, error } = await db
-    .from('reveals')
-    .select('id')
-    .eq('payer_id', payerId)
-    .eq('target_id', targetId)
-    .maybeSingle();
-  if (error) throw error;
-  if (!reveal) return null;
-  // Pre-existing reveals rows only (DEC-003). Never widen this to more fields, such as
-  // instagram_handle: nobody consented to that disclosure (PRIV-001, ID-001).
-  const { data: user, error: uErr } = await db
-    .from('users')
-    .select('real_name, email')
-    .eq('clerk_id', targetId)
-    .single();
-  if (uErr) throw uErr;
-  return user as RevealedIdentity;
 }
 
 export async function getRoomState(roomId: string, userId: string): Promise<RoomState> {
   const { db, me, partner, partnerId, room } = await loadRoom(roomId, userId);
-  const [{ data: messages, error }, extraSeconds, revealed] = await Promise.all([
+  // `revealed` comes only from a contact_reveals row for this pair. Rows in the
+  // old payer-only `reveals` table are no longer read or shown (DEC-003).
+  const [{ data: messages, error }, extraSeconds, consent, revealed] = await Promise.all([
     db
       .from('messages')
       .select('id, room_id, sender_id, text, created_at, read_by')
@@ -168,7 +157,8 @@ export async function getRoomState(roomId: string, userId: string): Promise<Room
       .order('created_at', { ascending: true })
       .limit(500),
     extraSecondsFor(roomId),
-    getRevealed(userId, partnerId),
+    getRoomConsent(roomId, userId),
+    getRevealedContact(userId, partnerId),
   ]);
   if (error) throw error;
   return {
@@ -178,6 +168,8 @@ export async function getRoomState(roomId: string, userId: string): Promise<Room
     messages: messages ?? [],
     timerStartedAt: room.timer_started_at,
     extraSeconds,
+    unlimited: room.unlimited,
+    consent,
     revealed,
   };
 }

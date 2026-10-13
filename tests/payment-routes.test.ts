@@ -1,10 +1,12 @@
 // TEST-004 (subset): payment routes are inert unless Paid Mode is effective (FREE-004,
 // CFG-002, CFG-003), and in Paid Mode act only on a verified signature and the ledger
-// (PAY-003, PAY-004, PAY-005, PAY-006, PAY-007, PAY-008, PAY-009, PAY-010).
+// (PAY-003, PAY-004, PAY-005, PAY-006, PAY-007, PAY-008, PAY-009, PAY-010). A captured
+// payment makes the room unlimited at once and creates a pending request to share contact
+// details. It never reveals anything: no reveal row, no identity in any response (ID-002;
+// DEC-002 as revised 2026-10-14).
 import crypto from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-type Row = Record<string, unknown>;
+import { createFakeDb, type FakeDb, type Row, type Write } from './helpers/fakeDb';
 
 const mocks = vi.hoisted(() => ({
   userId: 'user_alice' as string | null,
@@ -38,63 +40,30 @@ const ROOM = 'user_alice_user_bob';
 const ORDER = 'order_test_1';
 const PAYMENT = 'pay_test_1';
 
-// A stand-in for the tables the payment code touches: `payment_orders` rows
-// live in `ledger`, `webhook_events` rows in `events`, and every write to any
-// table is recorded in `writes`. `grantError`, when set, is what the
-// `chat_extensions` upsert fails with.
+// The in-memory database (tests/helpers/fakeDb.ts). `ledger` is its
+// `payment_orders` table, `events` its `webhook_events` table, and `writes`
+// every write made to any table.
+let db: FakeDb;
 let ledger: Row[] = [];
 let events: Row[] = [];
-let writes: { table: string; op: 'insert' | 'upsert' | 'update'; row: Row }[] = [];
-let grantError: Row | null = null;
+let writes: Write[] = [];
 let eventCount = 0;
+const ORDER_ROW_ID = 'po_1';
 
-function fakeSupabase() {
-  return {
-    from(table: string) {
-      const filters: ((row: Row) => boolean)[] = [];
-      let update: Row | null = null;
-      const rows = table === 'payment_orders' ? ledger : table === 'webhook_events' ? events : [];
-      const matching = () => rows.filter((row) => filters.every((f) => f(row)));
-      const query = {
-        select: () => query,
-        eq: (column: string, value: unknown) => (filters.push((row) => row[column] === value), query),
-        neq: (column: string, value: unknown) => (filters.push((row) => row[column] !== value), query),
-        maybeSingle: async () => ({ data: matching()[0] ?? null, error: null }),
-        insert: async (row: Row) => {
-          writes.push({ table, op: 'insert', row });
-          if (table === 'payment_orders') ledger.push({ payment_id: null, ...row });
-          return { error: null };
-        },
-        upsert: async (row: Row) => {
-          if (table === 'chat_extensions' && grantError) return { error: grantError };
-          writes.push({ table, op: 'upsert', row });
-          if (table === 'webhook_events' && !events.some((e) => e.event_id === row.event_id)) events.push(row);
-          return { error: null };
-        },
-        update: (values: Row) => ((update = values), query),
-        // Awaiting the builder runs the update, as the Supabase client does.
-        then: (resolve: (result: { error: null }) => unknown) => {
-          const values = update;
-          if (values) {
-            for (const row of matching()) {
-              Object.assign(row, values);
-              writes.push({ table, op: 'update', row: values });
-            }
-          }
-          return Promise.resolve({ error: null }).then(resolve);
-        },
-      };
-      return query;
-    },
-  };
-}
-
-const writesTo = (table: string) => writes.filter((w) => w.table === table);
+const writesTo = (table: string) => db.writesTo(table);
 /** Writes that change what a user has or what the ledger says; event bookkeeping left out. */
 const ledgerAndGrantWrites = () => writes.filter((w) => w.table !== 'webhook_events');
+/** What a payment may create: the request, and nothing that shares identity or adds time. */
+const requests = () => db.rowsOf('contact_consents');
 
 function seedOrder(overrides: Row = {}) {
-  ledger.push({ user_id: 'user_alice', room_id: ROOM, order_id: ORDER, payment_id: null, status: 'created', amount: 2900, currency: 'INR', ...overrides });
+  db.seed('payment_orders', { id: ORDER_ROW_ID, user_id: 'user_alice', room_id: ROOM, order_id: ORDER, payment_id: null, status: 'created', amount: 2900, currency: 'INR', ...overrides });
+}
+
+function seedRoomAndDancers() {
+  db.seed('users', { clerk_id: 'user_alice', display_name: 'Alice_1', gender: 'female', real_name: 'Alice Patel', email: 'alice@example.com' });
+  db.seed('users', { clerk_id: 'user_bob', display_name: 'Bob_1', gender: 'male', real_name: 'Bob Sharma', email: 'bob@example.com' });
+  db.seed('rooms', { id: ROOM, participant_ids: ['user_alice', 'user_bob'] });
 }
 
 function setEnv(vars: Record<string, string>) {
@@ -131,10 +100,10 @@ const CONNECTION_LOST = { code: '08006', message: 'connection failure' };
 let warnLog: ReturnType<typeof vi.spyOn>;
 let errorLog: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
-  ledger = [];
-  events = [];
-  writes = [];
-  grantError = null;
+  db = createFakeDb();
+  ledger = db.rowsOf('payment_orders');
+  events = db.rowsOf('webhook_events');
+  writes = db.writes;
   eventCount = 0;
   mocks.userId = 'user_alice';
   mocks.ordersCreate.mockResolvedValue({ id: ORDER });
@@ -157,7 +126,7 @@ describe('Free Mode (BILLING_MODE unset, valid credentials present)', () => {
   beforeEach(() => setEnv({ ...CREDENTIALS, BILLING_MODE: '' }));
 
   it('create-order returns 403 billing_disabled without touching Razorpay or the database', async () => {
-    const res = await createOrder(post('/api/payment/create-order', { type: 'extend', roomId: ROOM }));
+    const res = await createOrder(post('/api/payment/create-order', { type: 'connect', roomId: ROOM }));
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ error: 'billing_disabled' });
     expect(mocks.razorpayClient).not.toHaveBeenCalled();
@@ -174,7 +143,7 @@ describe('Free Mode (BILLING_MODE unset, valid credentials present)', () => {
 
   it('unauthenticated callers still get 401', async () => {
     mocks.userId = null;
-    const res = await createOrder(post('/api/payment/create-order', { type: 'extend', roomId: ROOM }));
+    const res = await createOrder(post('/api/payment/create-order', { type: 'connect', roomId: ROOM }));
     expect(res.status).toBe(401);
   });
 
@@ -213,7 +182,7 @@ describe('Paid Mode requested but not ready', () => {
   beforeEach(() => setEnv({ ...CREDENTIALS, BILLING_MODE: 'paid', RAZORPAY_KEY_SECRET: '' }));
 
   it('create-order returns 503 billing_unavailable without touching Razorpay', async () => {
-    const res = await createOrder(post('/api/payment/create-order', { type: 'extend', roomId: ROOM }));
+    const res = await createOrder(post('/api/payment/create-order', { type: 'connect', roomId: ROOM }));
     expect(res.status).toBe(503);
     expect(await res.json()).toEqual({ error: 'billing_unavailable' });
     expect(mocks.razorpayClient).not.toHaveBeenCalled();
@@ -236,12 +205,13 @@ describe('Paid Mode requested but not ready', () => {
 describe('Paid Mode ready (fake test keys, Razorpay SDK and database mocked)', () => {
   beforeEach(() => {
     setEnv({ ...CREDENTIALS, BILLING_MODE: 'paid' });
-    mocks.supabaseAdmin.mockImplementation(fakeSupabase);
+    mocks.supabaseAdmin.mockImplementation(() => db.client);
+    seedRoomAndDancers();
   });
 
   describe('create-order', () => {
     it('creates a Razorpay order at the server-fixed price and returns its public details', async () => {
-      const res = await createOrder(post('/api/payment/create-order', { type: 'extend', roomId: ROOM, amount: 1 }));
+      const res = await createOrder(post('/api/payment/create-order', { type: 'connect', roomId: ROOM, amount: 1 }));
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ orderId: ORDER, amount: 2900, currency: 'INR', keyId: CREDENTIALS.NEXT_PUBLIC_RAZORPAY_KEY_ID });
       expect(mocks.ordersCreate).toHaveBeenCalledTimes(1);
@@ -249,28 +219,74 @@ describe('Paid Mode ready (fake test keys, Razorpay SDK and database mocked)', (
     });
 
     it('records the order in the ledger as created, owned by the caller', async () => {
-      await createOrder(post('/api/payment/create-order', { type: 'extend', roomId: ROOM }));
+      await createOrder(post('/api/payment/create-order', { type: 'connect', roomId: ROOM }));
       expect(writesTo('payment_orders')).toEqual([
         { table: 'payment_orders', op: 'insert', row: { user_id: 'user_alice', room_id: ROOM, order_id: ORDER, status: 'created', amount: 2900, currency: 'INR' } },
       ]);
     });
 
     it('never returns a secret', async () => {
-      const res = await createOrder(post('/api/payment/create-order', { type: 'extend', roomId: ROOM }));
+      const res = await createOrder(post('/api/payment/create-order', { type: 'connect', roomId: ROOM }));
       const body = await res.text();
       expect(body).not.toContain(CREDENTIALS.RAZORPAY_KEY_SECRET);
       expect(body).not.toContain(CREDENTIALS.RAZORPAY_WEBHOOK_SECRET);
     });
 
-    it('refuses the withdrawn identity reveal product (DEC-002)', async () => {
-      const res = await createOrder(post('/api/payment/create-order', { type: 'reveal', targetUserId: 'user_bob' }));
+    it.each([
+      ['the old payer-only reveal', { type: 'reveal', targetUserId: 'user_bob' }],
+      ['the retired paid chat extension', { type: 'extend', roomId: ROOM }],
+    ])('refuses %s: connect is the only product', async (_name, body) => {
+      const res = await createOrder(post('/api/payment/create-order', body));
       expect(res.status).toBe(400);
       expect(mocks.ordersCreate).not.toHaveBeenCalled();
       expect(writes).toEqual([]);
     });
 
+    it('takes no money when the room already has a request waiting for an answer', async () => {
+      db.seed('contact_consents', { room_id: ROOM, requester_id: 'user_bob', partner_id: 'user_alice', payment_order_id: 'po_bob' });
+      const res = await createOrder(post('/api/payment/create-order', { type: 'connect', roomId: ROOM }));
+      expect(res.status).toBe(409);
+      expect(mocks.ordersCreate).not.toHaveBeenCalled();
+      expect(ledger).toEqual([]);
+    });
+
+    it('takes no money from someone whose request in this room was declined: they cannot ask again', async () => {
+      db.seed('contact_consents', { room_id: ROOM, requester_id: 'user_alice', partner_id: 'user_bob', payment_order_id: 'po_old', status: 'declined' });
+      const res = await createOrder(post('/api/payment/create-order', { type: 'connect', roomId: ROOM }));
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: 'You have already asked in this chat' });
+      expect(mocks.ordersCreate).not.toHaveBeenCalled();
+    });
+
+    it('takes no second payment for a room that is already unlimited, even from the person who declined', async () => {
+      // Bob paid, so the room is unlimited; Alice declined to share details. There is nothing left to sell here.
+      db.rowsOf('rooms')[0].unlimited = true;
+      db.seed('contact_consents', { room_id: ROOM, requester_id: 'user_bob', partner_id: 'user_alice', payment_order_id: 'po_bob', status: 'declined' });
+      const res = await createOrder(post('/api/payment/create-order', { type: 'connect', roomId: ROOM }));
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: 'This chat already has no time limit' });
+      expect(mocks.ordersCreate).not.toHaveBeenCalled();
+      expect(ledger).toEqual([]);
+    });
+
+    it('takes no money once the two are connected', async () => {
+      db.seed('contact_consents', { room_id: ROOM, requester_id: 'user_bob', partner_id: 'user_alice', payment_order_id: 'po_bob', status: 'accepted' });
+      const res = await createOrder(post('/api/payment/create-order', { type: 'connect', roomId: ROOM }));
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: 'You two are already connected' });
+      expect(mocks.ordersCreate).not.toHaveBeenCalled();
+    });
+
+    it('takes no money when the partner has no profile to connect with (PAY-011)', async () => {
+      db.tables.users = db.rowsOf('users').filter((u) => u.clerk_id !== 'user_bob');
+      const res = await createOrder(post('/api/payment/create-order', { type: 'connect', roomId: ROOM }));
+      expect(res.status).toBe(404);
+      expect(mocks.ordersCreate).not.toHaveBeenCalled();
+      expect(ledger).toEqual([]);
+    });
+
     it("refuses a room the caller is not part of", async () => {
-      const res = await createOrder(post('/api/payment/create-order', { type: 'extend', roomId: 'user_bob_user_carol' }));
+      const res = await createOrder(post('/api/payment/create-order', { type: 'connect', roomId: 'user_bob_user_carol' }));
       expect(res.status).toBe(400);
       expect(mocks.ordersCreate).not.toHaveBeenCalled();
     });
@@ -294,15 +310,33 @@ describe('Paid Mode ready (fake test keys, Razorpay SDK and database mocked)', (
       expect(mocks.paymentsFetch).not.toHaveBeenCalled();
     });
 
-    it('returns 200 { verified: true } for a correct signature, grants the extension and marks the order paid', async () => {
+    it('returns 200 { verified: true } for a correct signature, unlocks the chat, creates a pending request and marks the order paid', async () => {
       const res = await verify(post('/api/payment/verify', checkoutResponse()));
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ verified: true });
-      expect(writesTo('chat_extensions')).toEqual([
-        { table: 'chat_extensions', op: 'upsert', row: expect.objectContaining({ room_id: ROOM, payment_id: PAYMENT, extra_seconds: 120 }) },
+      expect(writesTo('contact_consents')).toEqual([
+        {
+          table: 'contact_consents',
+          op: 'upsert',
+          row: { room_id: ROOM, requester_id: 'user_alice', partner_id: 'user_bob', payment_order_id: ORDER_ROW_ID },
+        },
       ]);
+      expect(requests()).toEqual([expect.objectContaining({ status: 'pending', requester_id: 'user_alice', partner_id: 'user_bob' })]);
+      // rooms.unlimited is set at payment time, without waiting for the partner.
+      expect(writesTo('rooms')).toEqual([{ table: 'rooms', op: 'update', row: { unlimited: true } }]);
+      expect(db.rowsOf('rooms')[0]).toMatchObject({ unlimited: true });
       expect(ledger[0]).toMatchObject({ order_id: ORDER, payment_id: PAYMENT, status: 'paid' });
       expect(mocks.paymentsFetch).toHaveBeenCalledWith(PAYMENT);
+    });
+
+    it('a payment unlocks the chat but reveals nothing: only the partner’s answer can (ID-002)', async () => {
+      const res = await verify(post('/api/payment/verify', checkoutResponse()));
+      expect(await res.text()).toBe('{"verified":true}'); // nothing about anyone's identity
+      expect(writesTo('chat_extensions')).toEqual([]);
+      expect(db.rowsOf('contact_reveals')).toEqual([]);
+      expect(db.rpcCalls).toEqual([]);
+      // The payment path never even reads the users table, let alone real_name or email.
+      expect(db.selected.users).toBeUndefined();
     });
 
     it.each([
@@ -347,11 +381,11 @@ describe('Paid Mode ready (fake test keys, Razorpay SDK and database mocked)', (
     });
 
     it('a captured payment for a room that no longer exists is recorded as fulfilment_failed, not granted (PAY-010)', async () => {
-      grantError = ROOM_MISSING;
+      db.tables.rooms = []; // the real foreign key refuses the request
       const res = await verify(post('/api/payment/verify', checkoutResponse()));
       expect(res.status).toBe(409);
       expect(await res.json()).toEqual({ verified: false, reason: 'fulfilment_failed' });
-      expect(writesTo('chat_extensions')).toEqual([]);
+      expect(requests()).toEqual([]);
       expect(ledger[0]).toMatchObject({ payment_id: PAYMENT, status: 'fulfilment_failed' });
     });
 
@@ -400,12 +434,65 @@ describe('Paid Mode ready (fake test keys, Razorpay SDK and database mocked)', (
       expect(writes).toEqual([]);
     });
 
-    it('payment.captured grants the extension and marks the order paid', async () => {
+    it('payment.captured unlocks the chat, creates the pending request and marks the order paid', async () => {
       const res = await webhook(signedWebhook(capturedEvent));
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ ok: true, result: 'fulfilled' });
-      expect(writesTo('chat_extensions')).toHaveLength(1);
+      expect(requests()).toEqual([expect.objectContaining({ status: 'pending', payment_order_id: ORDER_ROW_ID })]);
+      expect(db.rowsOf('rooms')[0]).toMatchObject({ unlimited: true });
+      expect(writesTo('chat_extensions')).toEqual([]);
+      expect(db.rowsOf('contact_reveals')).toEqual([]);
       expect(ledger[0]).toMatchObject({ payment_id: PAYMENT, status: 'paid' });
+    });
+
+    it('a second paid order for a room that already has a request is recorded as fulfilment_failed for refund (PAY-008)', async () => {
+      db.seed('contact_consents', { room_id: ROOM, requester_id: 'user_bob', partner_id: 'user_alice', payment_order_id: 'po_bob' });
+      const res = await webhook(signedWebhook(capturedEvent));
+      expect(await res.json()).toEqual({ ok: true, result: 'fulfilment_failed' });
+      expect(requests()).toHaveLength(1);
+      expect(writesTo('rooms')).toEqual([]); // this payment unlocked nothing, so it is owed back
+      expect(ledger[0]).toMatchObject({ payment_id: PAYMENT, status: 'fulfilment_failed' });
+      expect(errorLog).toHaveBeenCalledWith(expect.stringContaining('fulfilment_failed'), expect.objectContaining({ reason: 'duplicate_request' }));
+    });
+
+    it('a decline never turns into a refund: a retry after a crash still unlocks the chat and marks the order paid', async () => {
+      // An earlier attempt got as far as creating the request, then failed; the partner said no in between.
+      db.seed('contact_consents', { room_id: ROOM, requester_id: 'user_alice', partner_id: 'user_bob', payment_order_id: ORDER_ROW_ID, status: 'declined' });
+      const res = await webhook(signedWebhook(capturedEvent));
+      expect(await res.json()).toEqual({ ok: true, result: 'fulfilled' });
+      expect(requests()).toHaveLength(1);
+      expect(db.rowsOf('rooms')[0]).toMatchObject({ unlimited: true });
+      expect(ledger[0]).toMatchObject({ payment_id: PAYMENT, status: 'paid' });
+    });
+
+    it('a payment whose chat could not be unlocked is never marked paid, and the redelivery then completes it (PAY-010)', async () => {
+      db.writeErrors.rooms = CONNECTION_LOST;
+      const first = await webhook(signedWebhook(capturedEvent, undefined, 'evt_unlock'));
+      expect(first.status).toBe(500);
+      expect(db.rowsOf('rooms')[0]).toMatchObject({ unlimited: false });
+      expect(ledger[0]).toMatchObject({ status: 'created', payment_id: null });
+
+      delete db.writeErrors.rooms;
+      const second = await webhook(signedWebhook(capturedEvent, undefined, 'evt_unlock'));
+      expect(await second.json()).toEqual({ ok: true, result: 'fulfilled' });
+      expect(requests()).toHaveLength(1);
+      expect(db.rowsOf('rooms')[0]).toMatchObject({ unlimited: true });
+      expect(ledger[0]).toMatchObject({ payment_id: PAYMENT, status: 'paid' });
+    });
+
+    it('a redelivered capture never reopens an order that has been refunded', async () => {
+      ledger[0].status = 'refunded';
+      ledger[0].payment_id = PAYMENT;
+      const res = await webhook(signedWebhook(capturedEvent));
+      expect(await res.json()).toEqual({ ok: true, result: 'already_processed' });
+      expect(ledgerAndGrantWrites()).toEqual([]);
+      expect(ledger[0]).toMatchObject({ status: 'refunded' });
+    });
+
+    it('a late payment.failed never overwrites an order that has been refunded', async () => {
+      ledger[0].status = 'refunded';
+      await webhook(signedWebhook(paymentEvent('payment.failed', { id: 'pay_failed_1' })));
+      expect(ledger[0]).toMatchObject({ status: 'refunded' });
     });
 
     it('a second payment.captured event for a paid order is acknowledged without granting again (PAY-008)', async () => {
@@ -419,7 +506,9 @@ describe('Paid Mode ready (fake test keys, Razorpay SDK and database mocked)', (
 
     it('records each handled event with its id and outcome (PAY-008)', async () => {
       await webhook(signedWebhook(capturedEvent));
-      expect(events).toEqual([{ event_id: 'evt_test_1', event: 'payment.captured', order_id: ORDER, payment_id: PAYMENT, outcome: 'fulfilled' }]);
+      expect(events).toEqual([
+        expect.objectContaining({ event_id: 'evt_test_1', event: 'payment.captured', order_id: ORDER, payment_id: PAYMENT, outcome: 'fulfilled' }),
+      ]);
     });
 
     it('a redelivered event id is skipped before anything is written (PAY-008)', async () => {
@@ -441,11 +530,11 @@ describe('Paid Mode ready (fake test keys, Razorpay SDK and database mocked)', (
     });
 
     it('a captured payment for a room that no longer exists is recorded as fulfilment_failed and acknowledged (PAY-010)', async () => {
-      grantError = ROOM_MISSING;
+      db.writeErrors.contact_consents = ROOM_MISSING;
       const res = await webhook(signedWebhook(capturedEvent));
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ ok: true, result: 'fulfilment_failed' });
-      expect(writesTo('chat_extensions')).toEqual([]);
+      expect(requests()).toEqual([]);
       expect(ledger[0]).toMatchObject({ payment_id: PAYMENT, status: 'fulfilment_failed' });
       expect(events[0]).toMatchObject({ outcome: 'fulfilment_failed' });
       expect(errorLog).toHaveBeenCalledWith(
@@ -459,35 +548,35 @@ describe('Paid Mode ready (fake test keys, Razorpay SDK and database mocked)', (
       const res = await webhook(signedWebhook(capturedEvent));
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ ok: true, result: 'fulfilment_failed' });
-      expect(writesTo('chat_extensions')).toEqual([]);
+      expect(requests()).toEqual([]);
       expect(ledger[0]).toMatchObject({ status: 'fulfilment_failed' });
     });
 
     it('a temporary database error returns 500 and the redelivery of the same event then fulfils (PAY-010)', async () => {
-      grantError = CONNECTION_LOST;
+      db.writeErrors.contact_consents = CONNECTION_LOST;
       const first = await webhook(signedWebhook(capturedEvent, undefined, 'evt_retry'));
       expect(first.status).toBe(500);
       expect(ledger[0]).toMatchObject({ status: 'created', payment_id: null });
       expect(events).toEqual([]);
 
-      grantError = null;
+      delete db.writeErrors.contact_consents;
       const second = await webhook(signedWebhook(capturedEvent, undefined, 'evt_retry'));
       expect(await second.json()).toEqual({ ok: true, result: 'fulfilled' });
       expect(ledger[0]).toMatchObject({ payment_id: PAYMENT, status: 'paid' });
     });
 
     it('an order left fulfilment_failed is settled by a later event once the cause is gone (PAY-010)', async () => {
-      grantError = ROOM_MISSING;
+      db.writeErrors.contact_consents = ROOM_MISSING;
       await webhook(signedWebhook(capturedEvent));
-      grantError = null;
+      delete db.writeErrors.contact_consents;
       const res = await webhook(signedWebhook(capturedEvent));
       expect(await res.json()).toEqual({ ok: true, result: 'fulfilled' });
-      expect(writesTo('chat_extensions')).toHaveLength(1);
+      expect(requests()).toHaveLength(1);
       expect(ledger[0]).toMatchObject({ payment_id: PAYMENT, status: 'paid' });
     });
 
     it('a late payment.failed never overwrites a fulfilment_failed order (PAY-009, PAY-010)', async () => {
-      grantError = ROOM_MISSING;
+      db.writeErrors.contact_consents = ROOM_MISSING;
       await webhook(signedWebhook(capturedEvent));
       await webhook(signedWebhook(paymentEvent('payment.failed', { id: 'pay_failed_1' })));
       expect(ledger[0]).toMatchObject({ payment_id: PAYMENT, status: 'fulfilment_failed' });
@@ -496,20 +585,21 @@ describe('Paid Mode ready (fake test keys, Razorpay SDK and database mocked)', (
     it('verify followed by the webhook for the same payment grants once', async () => {
       await verify(post('/api/payment/verify', checkoutResponse()));
       await webhook(signedWebhook(capturedEvent));
-      expect(writesTo('chat_extensions')).toHaveLength(1);
+      expect(requests()).toHaveLength(1);
+      expect(writesTo('contact_consents')).toHaveLength(1);
     });
 
     it('payment.failed marks the order failed and grants nothing', async () => {
       const res = await webhook(signedWebhook(paymentEvent('payment.failed')));
       expect(res.status).toBe(200);
-      expect(writesTo('chat_extensions')).toEqual([]);
+      expect(requests()).toEqual([]);
       expect(ledger[0]).toMatchObject({ payment_id: PAYMENT, status: 'failed' });
     });
 
     it('a failed attempt can be followed by a successful one on the same order', async () => {
       await webhook(signedWebhook(paymentEvent('payment.failed', { id: 'pay_failed_1' })));
       await webhook(signedWebhook(capturedEvent));
-      expect(writesTo('chat_extensions')).toHaveLength(1);
+      expect(requests()).toHaveLength(1);
       expect(ledger[0]).toMatchObject({ payment_id: PAYMENT, status: 'paid' });
     });
 

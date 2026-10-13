@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   insert: vi.fn(),
   timerStartedAt: null as string | null,
   extraSeconds: 0,
+  unlimited: false,
 }));
 
 vi.mock('@clerk/nextjs/server', () => ({ auth: () => ({ userId: 'user_alice' }) }));
@@ -18,7 +19,7 @@ vi.mock('@/lib/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/server')>()),
   extraSecondsFor: async () => mocks.extraSeconds,
   loadRoom: async () => ({
-    room: { id: 'user_alice_user_bob', timer_started_at: mocks.timerStartedAt },
+    room: { id: 'user_alice_user_bob', timer_started_at: mocks.timerStartedAt, unlimited: mocks.unlimited },
     db: {
       from: () => ({
         insert: (row: Record<string, unknown>) => {
@@ -42,6 +43,7 @@ beforeEach(() => {
   mocks.insert.mockClear();
   mocks.timerStartedAt = null;
   mocks.extraSeconds = 0;
+  mocks.unlimited = false;
 });
 
 describe('POST /api/rooms/[roomId]/messages and chat expiry', () => {
@@ -70,6 +72,13 @@ describe('POST /api/rooms/[roomId]/messages and chat expiry', () => {
     expect((await send()).status).toBe(200);
     mocks.timerStartedAt = ago(241);
     expect((await send()).status).toBe(403);
+    expect(mocks.insert).toHaveBeenCalledTimes(1);
+  });
+
+  it('never expires a room that has been paid for (rooms.unlimited)', async () => {
+    mocks.unlimited = true;
+    mocks.timerStartedAt = ago(24 * 60 * 60);
+    expect((await send()).status).toBe(200);
     expect(mocks.insert).toHaveBeenCalledTimes(1);
   });
 });

@@ -9,12 +9,17 @@ type Handlers = {
   onMessageUpdate: (m: Message) => void;
   onTimerStart: (iso: string) => void;
   onExtension: (extraSeconds: number) => void;
+  /** A connect request in this room was created or answered. Carries no identity: refetch the room from the server. */
+  onConsentChange: () => void;
+  /** The room became unlimited (it was paid for). */
+  onUnlimited: () => void;
 };
 
 /**
  * Subscribes to everything a chat room needs on one channel `room:<id>`:
- * message inserts/updates, the room row (timer start), extensions, and
- * presence so we know when both dancers have the room open.
+ * message inserts/updates, the room row (timer start, unlimited), extensions,
+ * connect requests, and presence so we know when both dancers have the room
+ * open.
  */
 export function useRoomRealtime(roomId: string, userId: string | null, handlers: Handlers) {
   const supabase = useSupabase();
@@ -34,9 +39,14 @@ export function useRoomRealtime(roomId: string, userId: string | null, handlers:
         h.current.onMessageUpdate(p.new as Message),
       )
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` }, (p) => {
-        const iso = (p.new as { timer_started_at: string | null }).timer_started_at;
-        if (iso) h.current.onTimerStart(iso);
+        const room = p.new as { timer_started_at: string | null; unlimited?: boolean };
+        if (room.timer_started_at) h.current.onTimerStart(room.timer_started_at);
+        if (room.unlimited) h.current.onUnlimited();
       })
+      // RLS delivers these rows only to the requester and the person asked.
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'contact_consents', filter: `room_id=eq.${roomId}` }, () =>
+        h.current.onConsentChange(),
+      )
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_extensions', filter: `room_id=eq.${roomId}` }, (p) =>
         h.current.onExtension((p.new as { extra_seconds: number }).extra_seconds),
       )

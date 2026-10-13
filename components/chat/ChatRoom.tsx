@@ -7,17 +7,17 @@ import { ChevronLeft, SendHorizontal } from 'lucide-react';
 import { Avatar } from '@/components/ui/Avatar';
 import { GenderBadge } from '@/components/ui/GenderBadge';
 import { ChatTimer } from './ChatTimer';
+import { ConsentBanner } from './ConsentBanner';
 import { MessageBubble } from './MessageBubble';
 import { RevealCard } from './RevealCard';
 import { RoomSidebar } from './RoomSidebar';
 import { TimerExpiredOverlay } from './TimerExpiredOverlay';
-import { ExtendModal } from '@/components/modals/ExtendModal';
+import { ConnectModal } from '@/components/modals/ConnectModal';
 import { Toast } from '@/components/ui/Toast';
 import { useRoomRealtime } from '@/hooks/useSupabaseRealtime';
 import { useChatTimer } from '@/hooks/useChatTimer';
 import { useRazorpay } from '@/hooks/useRazorpay';
-import { useAppStore } from '@/store/useAppStore';
-import { buttonVariants } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { fireCelebration } from '@/lib/confetti';
 import type { Message, RoomState } from '@/lib/types';
@@ -30,21 +30,26 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
   const [messages, setMessages] = useState<Message[]>(initial.messages);
   const [timerStartedAt, setTimerStartedAt] = useState(initial.timerStartedAt);
   const [extraSeconds, setExtraSeconds] = useState(initial.extraSeconds);
-  const storedReveal = useAppStore((s) => s.revealed[partner.clerk_id]);
-  const setRevealedInStore = useAppStore((s) => s.setRevealed);
-  const revealed = storedReveal ?? initial.revealed;
+  // Connection state always comes from the server (initial render, then refresh); nothing is kept in browser storage.
+  const [unlimited, setUnlimited] = useState(initial.unlimited);
+  const [consent, setConsent] = useState(initial.consent);
+  const [revealed, setRevealed] = useState(initial.revealed);
+  const [answering, setAnswering] = useState(false);
+  const [answerError, setAnswerError] = useState<string | null>(null);
 
   const [text, setText] = useState('');
-  const [sheet, setSheet] = useState<'extend' | null>(null);
+  const [sheet, setSheet] = useState<'connect' | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLInputElement>(null);
   const { pay, busy, error: payError, clearError } = useRazorpay();
 
-  const timer = useChatTimer(timerStartedAt, extraSeconds, renderedAt);
-  // Free Mode has no extension, so a closed chat stays readable instead of blurring behind an overlay.
-  const closedFree = timer.expired && !billingEnabled;
+  const timer = useChatTimer(timerStartedAt, extraSeconds, renderedAt, unlimited);
+  // The offer is Paid Mode only, and only for a room nobody has paid for yet: paying makes it unlimited at once.
+  const canOffer = billingEnabled && consent.canRequest && !unlimited;
+  // With nothing to offer, a closed chat stays readable instead of blurring behind an overlay.
+  const closed = timer.expired && !canOffer;
 
   const refresh = useCallback(async () => {
     const res = await fetch(`/api/rooms/${encodeURIComponent(roomId)}`);
@@ -52,8 +57,17 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
     const s = (await res.json()) as RoomState;
     setTimerStartedAt(s.timerStartedAt);
     setExtraSeconds(s.extraSeconds);
-    if (s.revealed) setRevealedInStore(partner.clerk_id, s.revealed);
-  }, [roomId, partner.clerk_id, setRevealedInStore]);
+    setUnlimited(s.unlimited);
+    setConsent(s.consent);
+    setRevealed(s.revealed);
+  }, [roomId]);
+
+  // Celebrate the moment contact details are exchanged, on both screens.
+  const wasConnected = useRef(initial.revealed !== null);
+  useEffect(() => {
+    if (revealed && !wasConnected.current) fireCelebration();
+    wasConnected.current = revealed !== null;
+  }, [revealed]);
 
   const upsert = useCallback((m: Message) => {
     setMessages((prev) => {
@@ -73,10 +87,10 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
     onMessage: upsert,
     onMessageUpdate: upsert,
     onTimerStart: setTimerStartedAt,
-    onExtension: () => {
-      void refresh();
-      fireCelebration();
-    },
+    onExtension: () => void refresh(),
+    // These events say only that something changed; names and emails come from the server on refresh.
+    onConsentChange: () => void refresh(),
+    onUnlimited: () => void refresh(),
   });
 
   // Start the clock once both have spoken and both are in the room.
@@ -163,12 +177,30 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
     setSheet(null);
     await refresh();
     fireCelebration();
-    setToast('+2 minutes added');
+    setToast('Chat unlocked. Request sent.');
   };
 
   const openSheet = () => {
     clearError();
-    setSheet('extend');
+    setSheet('connect');
+  };
+
+  const answer = async (action: 'accept' | 'decline') => {
+    setAnswering(true);
+    setAnswerError(null);
+    const failed = 'Could not send your answer. Try again.';
+    try {
+      const res = await fetch(`/api/rooms/${encodeURIComponent(roomId)}/consent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      });
+      if (!res.ok) setAnswerError(((await res.json().catch(() => ({}))) as { error?: string }).error ?? failed);
+    } catch {
+      setAnswerError(failed);
+    }
+    await refresh();
+    setAnswering(false);
   };
 
   const waitingFor = !timer.started
@@ -206,7 +238,7 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
               <div className="flex min-w-0 items-center gap-2">
                 <p className="truncate font-display text-[15px] text-paper sm:text-base">{revealed?.real_name ? revealed.real_name : partner.display_name}</p>
                 {revealed && (
-                  <span className="shrink-0 rounded bg-haldi/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-haldi">Unlocked</span>
+                  <span className="shrink-0 rounded bg-haldi/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-haldi">Connected</span>
                 )}
                 <GenderBadge gender={partner.gender} className="shrink-0" />
                 {partner.vibe_tag && (
@@ -227,13 +259,27 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
                 )}
               </p>
             </div>
+            {canOffer && !timer.expired && (
+              <Button variant="haldi" size="sm" className="shrink-0" onClick={openSheet}>
+                Connect ₹29
+              </Button>
+            )}
           </div>
           <RevealCard identity={revealed} />
-          <ChatTimer started={timer.started} remaining={timer.remaining} total={timer.total} fraction={timer.fraction} waitingFor={waitingFor} />
+          <ConsentBanner consent={consent} partnerName={firstName} busy={answering} error={answerError} onAnswer={answer} />
+          <ChatTimer
+            started={timer.started}
+            remaining={timer.remaining}
+            total={timer.total}
+            fraction={timer.fraction}
+            waitingFor={waitingFor}
+            unlimited={unlimited}
+            connected={revealed !== null}
+          />
         </header>
 
         <div className="relative min-h-0 flex-1 overflow-hidden">
-          <div className={cn('bandhani h-full overflow-y-auto px-3 py-5 transition-[filter] duration-500 sm:px-5', timer.expired && billingEnabled && 'pointer-events-none blur-[3px]')}>
+          <div className={cn('bandhani h-full overflow-y-auto px-3 py-5 transition-[filter] duration-500 sm:px-5', timer.expired && canOffer && 'pointer-events-none blur-[3px]')}>
             <div className="mx-auto flex min-h-full max-w-2xl flex-col">
               {messages.length === 0 ? (
                 <div className="m-auto w-full max-w-sm py-6 text-center">
@@ -275,10 +321,10 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
               <div ref={bottom} />
             </div>
           </div>
-          {billingEnabled && <TimerExpiredOverlay show={timer.expired && sheet === null} onExtend={openSheet} />}
+          {canOffer && <TimerExpiredOverlay show={timer.expired && sheet === null} onConnect={openSheet} partnerName={firstName} />}
         </div>
 
-        {closedFree ? (
+        {closed ? (
           <div role="status" className="border-t border-paper/10 bg-ink-2 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4 sm:px-5">
             <div className="mx-auto flex max-w-2xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -337,10 +383,14 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
         bothSpoke={bothSpoke}
         started={timer.started}
         expired={timer.expired}
+        unlimited={unlimited}
+        connected={revealed !== null}
         className="relative hidden lg:flex"
       />
 
-      {billingEnabled && <ExtendModal open={sheet === 'extend'} onClose={() => setSheet(null)} onPay={startPayment} busy={busy} error={payError} />}
+      {billingEnabled && (
+        <ConnectModal open={sheet === 'connect'} onClose={() => setSheet(null)} onPay={startPayment} busy={busy} error={payError} partnerName={firstName} />
+      )}
       <Toast message={toast} onDone={() => setToast(null)} />
     </main>
   );

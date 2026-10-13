@@ -9,7 +9,7 @@ export async function POST(req: Request, { params }: { params: { roomId: string 
     if (!clean) throw new HttpError(400, 'Empty message');
 
     const { db, room } = await loadRoom(roomId, userId);
-    if (isExpired(room.timer_started_at, await extraSecondsFor(roomId))) {
+    if (isExpired(room.timer_started_at, await extraSecondsFor(roomId), room.unlimited)) {
       throw new HttpError(403, 'Chat time is up');
     }
 

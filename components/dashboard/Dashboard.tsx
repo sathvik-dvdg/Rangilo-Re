@@ -15,7 +15,7 @@ import { useLobbyPresence } from '@/hooks/useLobbyPresence';
 import { useAppStore } from '@/store/useAppStore';
 import { roomIdFor } from '@/lib/room';
 import { cn, timeAgo } from '@/lib/utils';
-import { VIBE_TAGS, type MyProfile, type PublicProfile } from '@/lib/types';
+import { VIBE_TAGS, type MyProfile, type PublicProfile, type RevealedIdentity } from '@/lib/types';
 
 type Filter = 'all' | 'female' | 'male' | 'online';
 const FILTERS: { id: Filter; label: string }[] = [
@@ -39,7 +39,10 @@ type RowData = {
   rows: PublicProfile[][];
   cols: number;
   onlineIds: Set<string>;
-  revealed: Record<string, { real_name: string; email: string }>;
+  /** Dancers this user is connected with: both agreed to exchange contact details. */
+  revealed: Record<string, RevealedIdentity>;
+  /** Dancers whose connect request is waiting for this user's answer. */
+  incoming: Set<string>;
   open: (u: PublicProfile) => void;
 };
 
@@ -56,6 +59,7 @@ function Row({ index, style, data }: ListChildComponentProps<RowData>) {
 function DancerCard({ u, index, data }: { u: PublicProfile; index: number; data: RowData }) {
   const online = data.onlineIds.has(u.clerk_id);
   const unlocked = data.revealed[u.clerk_id];
+  const wantsToConnect = data.incoming.has(u.clerk_id);
   return (
     <div className="min-w-0">
       <motion.button
@@ -84,7 +88,7 @@ function DancerCard({ u, index, data }: { u: PublicProfile; index: number; data:
         </div>
 
         <div className="min-w-0 flex-1 border-b border-paper/[0.07] pb-2 pt-2 lg:border-b-0 lg:py-0">
-          {/* Top line: Name, Unlocked badge (if revealed), Gender, Branch, Vibe */}
+          {/* Top line: Name, Connected badge or pending request, Gender, Branch, Vibe */}
           <div className="flex items-center gap-1.5 flex-wrap">
             <p className="truncate font-display text-[15px] font-semibold text-paper">
               {unlocked?.real_name ? unlocked.real_name : u.display_name}
@@ -92,7 +96,12 @@ function DancerCard({ u, index, data }: { u: PublicProfile; index: number; data:
             {unlocked && (
               <span className="flex items-center gap-1 rounded bg-[#7FB069]/20 border border-[#7FB069]/30 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#9CC587]">
                 <Unlock className="h-2.5 w-2.5" />
-                Unlocked
+                Connected
+              </span>
+            )}
+            {wantsToConnect && (
+              <span className="rounded border border-haldi/50 bg-haldi/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-haldi">
+                Wants to connect
               </span>
             )}
             <GenderBadge gender={u.gender} />
@@ -142,8 +151,9 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
   const { userId } = useAuth();
   const router = useRouter();
   const onlineIds = useAppStore((s) => s.onlineIds);
-  const revealed = useAppStore((s) => s.revealed);
-  const setRevealedInStore = useAppStore((s) => s.setRevealed);
+  // Held in memory only and refetched from the server on every load; never written to browser storage.
+  const [revealed, setRevealed] = useState<Record<string, RevealedIdentity>>({});
+  const [incoming, setIncoming] = useState<Set<string>>(() => new Set());
   const [users, setUsers] = useState<PublicProfile[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -170,18 +180,15 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
       })
       .catch((e: Error) => setError(e.message || 'Could not load dancers. Try again in a moment.'));
 
-    // Fetch unlocked profiles so real names and unlocked status persist across refreshes
+    // Connections (both people agreed) and requests waiting for this user's answer. The server decides both.
     fetch('/api/reveals')
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (d?.revealed) {
-          for (const [targetId, identity] of Object.entries(d.revealed)) {
-            setRevealedInStore(targetId, identity as { real_name: string; email: string });
-          }
-        }
+      .then((d: { revealed?: Record<string, RevealedIdentity>; incoming?: string[] } | null) => {
+        setRevealed(d?.revealed ?? {});
+        setIncoming(new Set(d?.incoming ?? []));
       })
       .catch(() => {});
-  }, [me, attempt, setRevealedInStore]);
+  }, [me, attempt]);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -206,8 +213,12 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
         if (selectedVibe !== 'all' && u.vibe_tag !== selectedVibe) return false;
         return true;
       })
-      .sort((a, b) => Number(onlineIds.has(b.clerk_id)) - Number(onlineIds.has(a.clerk_id)));
-  }, [users, query, filter, selectedBranch, selectedYear, selectedVibe, onlineIds, revealed]);
+      // A request waiting for an answer comes first: it closes after 24 hours.
+      .sort(
+        (a, b) =>
+          Number(incoming.has(b.clerk_id)) - Number(incoming.has(a.clerk_id)) || Number(onlineIds.has(b.clerk_id)) - Number(onlineIds.has(a.clerk_id)),
+      );
+  }, [users, query, filter, selectedBranch, selectedYear, selectedVibe, onlineIds, revealed, incoming]);
 
   // Others online (presence includes me).
   const onlineCount = Math.max(0, onlineIds.size - (userId && onlineIds.has(userId) ? 1 : 0));
@@ -243,9 +254,10 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
       cols,
       onlineIds,
       revealed,
+      incoming,
       open: (u) => userId && router.push(`/chat/${encodeURIComponent(roomIdFor(userId, u.clerk_id))}`),
     };
-  }, [visible, cols, onlineIds, revealed, userId, router]);
+  }, [visible, cols, onlineIds, revealed, incoming, userId, router]);
 
   const lobbyNotice = (
     <div className="flex items-center gap-2 rounded-xl border border-haldi/20 bg-ink-2/80 px-3.5 py-2 text-xs text-paper/75 shadow-sm lg:bg-ink/60">

@@ -15,6 +15,8 @@ export function RoomSidebar({
   bothSpoke,
   started,
   expired,
+  unlimited = false,
+  connected = false,
   className,
 }: {
   partner: PublicProfile;
@@ -22,6 +24,8 @@ export function RoomSidebar({
   bothSpoke: boolean;
   started: boolean;
   expired: boolean;
+  unlimited?: boolean;
+  connected?: boolean;
   className?: string;
 }) {
   const steps: { title: string; body: string; state: StepState }[] = [
@@ -33,13 +37,19 @@ export function RoomSidebar({
     {
       title: 'The clock runs',
       body: 'Use it to find each other on the floor.',
-      state: expired ? 'done' : started ? 'now' : 'next',
+      state: expired || unlimited ? 'done' : started ? 'now' : 'next',
     },
-    {
-      title: 'Back to the garba',
-      body: 'The chat closes when the clock runs out.',
-      state: expired ? 'now' : 'next',
-    },
+    unlimited
+      ? {
+          title: connected ? 'Connected' : 'Unlimited chat',
+          body: connected ? 'You both agreed to share contact details. This chat stays open.' : 'This chat has no time limit. It stays open.',
+          state: 'now',
+        }
+      : {
+          title: 'Back to the garba',
+          body: 'The chat closes when the clock runs out.',
+          state: expired ? 'now' : 'next',
+        },
   ];
 
   return (

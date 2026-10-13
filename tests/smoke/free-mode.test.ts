@@ -15,7 +15,7 @@
 import crypto from 'node:crypto';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { RoomState } from '@/lib/types';
+import type { RoomConsent, RoomState } from '@/lib/types';
 
 const providers = vi.hoisted(() => ({
   createClient: vi.fn(),
@@ -52,7 +52,8 @@ const FAKE = {
   NEXT_PUBLIC_RAZORPAY_KEY_ID: 'rzp_test_FakeKey12345678',
 };
 
-const PAYMENT_UI = [/₹/, /Razorpay/i, /Reveal Identity/i, /Extend Chat/i, /Unlock/i, /\bPay\b/];
+const PAYMENT_UI = [/₹/, /Razorpay/i, /Reveal Identity/i, /Extend Chat/i, /Unlock/i, /\bPay\b/, /Connect ₹/];
+const NO_REQUEST: RoomConsent = { status: null, role: null, canRequest: true };
 
 function roomState(timerStartedAt: string | null): RoomState {
   const profile = (clerk_id: string, display_name: string) => ({ clerk_id, display_name, gender: 'female' as const, last_seen: new Date().toISOString() });
@@ -63,6 +64,8 @@ function roomState(timerStartedAt: string | null): RoomState {
     messages: [],
     timerStartedAt,
     extraSeconds: 0,
+    unlimited: false,
+    consent: NO_REQUEST,
     revealed: null,
   };
 }
@@ -133,7 +136,7 @@ describe('Free Mode smoke (in-process, providers mocked)', () => {
   });
 
   it('payment creation is refused before any database or Razorpay access', async () => {
-    for (const body of [{ type: 'extend', roomId: ROOM }, { type: 'reveal', targetUserId: 'user_bob' }]) {
+    for (const body of [{ type: 'connect', roomId: ROOM }, { type: 'extend', roomId: ROOM }, { type: 'reveal', targetUserId: 'user_bob' }]) {
       const res = await createOrder(post('/api/payment/create-order', body));
       expect(res.status).toBe(403);
       expect(await res.json()).toEqual({ error: 'billing_disabled' });
@@ -160,18 +163,71 @@ describe('Free Mode smoke (in-process, providers mocked)', () => {
     // Entitlements are database rows; afterEach asserts the Supabase client was never even created.
   });
 
+  it('a request paid for before a rollback can still be answered, in a chat that stays open, with no payment UI (FREE-007)', async () => {
+    room.state = {
+      ...roomState(new Date(Date.now() - 60 * 60 * 1000).toISOString()),
+      unlimited: true,
+      consent: { status: 'pending', role: 'partner', canRequest: false },
+    };
+    const html = await renderChat();
+    expect(html).toContain('wants to share contact details');
+    expect(html).toContain('aria-label="Message"');
+    expect(html).toMatch(/>Accept<\/button>/);
+    expect(html).toMatch(/>Decline<\/button>/);
+    for (const pattern of PAYMENT_UI) expect(html).not.toMatch(pattern);
+  });
+
+  it('a connected room renders with the partner’s details, no countdown and no payment UI', async () => {
+    room.state = {
+      ...roomState(new Date(Date.now() - 60 * 60 * 1000).toISOString()),
+      unlimited: true,
+      consent: { status: 'accepted', role: 'requester', canRequest: false },
+      revealed: { real_name: 'Arjun Mehta', email: 'arjun@example.com' },
+    };
+    const html = await renderChat();
+    expect(html).toContain('Arjun Mehta');
+    expect(html).toContain('arjun@example.com');
+    expect(html).toContain('no time limit');
+    expect(html).toContain('aria-label="Message"'); // an hour past the start and still open
+    expect(html).not.toContain('Your 2-minute chat has ended');
+    for (const pattern of PAYMENT_UI) expect(html).not.toMatch(pattern);
+  });
+
   it.todo('landing page shows no ₹29 claims (FREE-003; blocked on DEC-008 copy decision)');
 });
 
 describe('control: the same render in Paid Mode does show payment UI', () => {
   // Proves the absence checks above can fail. Rendering only; no payment is attempted.
-  it('the extend offer appears when Paid Mode is effective; identity is never for sale (DEC-002)', async () => {
+  it('the offer appears when Paid Mode is effective, and says details are shared only if the partner accepts, with no refund on a decline', async () => {
     vi.stubEnv('BILLING_MODE', 'paid');
     room.state = roomState(new Date(Date.now() - 60 * 60 * 1000).toISOString());
     const html = await renderChat();
     expect(html).not.toMatch(/Reveal Identity/i);
-    expect(html).toMatch(/Extend Chat ₹29/);
+    expect(html).not.toMatch(/Extend Chat/i);
+    expect(html).toMatch(/Connect ₹29/);
+    expect(html).toContain('Nothing is shared unless they accept');
+    expect(html).toContain('the chat stays open and there is no refund');
     // The offer is never a dead end: a visible way back sits next to it (not just the header icon's label).
     expect(html).toMatch(/>Back to dancers<\/a>/);
+  });
+
+  it('after payment the chat is open with no offer and no expiry overlay, whatever the partner answers', async () => {
+    vi.stubEnv('BILLING_MODE', 'paid');
+    const longAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    for (const status of ['pending', 'declined', 'expired'] as const) {
+      room.state = { ...roomState(longAgo), unlimited: true, consent: { status, role: 'requester', canRequest: false } };
+      const html = await renderChat();
+      expect(html).not.toMatch(/₹/);
+      expect(html).not.toMatch(/Time&#x27;s Up|Time's Up|Your 2-minute chat has ended|refund/i);
+      expect(html).toContain('Unlimited chat');
+      expect(html).toContain('aria-label="Message"');
+      expect(html).toContain(
+        status === 'pending'
+          ? 'to answer your request to share contact details'
+          : status === 'declined'
+            ? 'Partner chose not to share details. Your chat remains open.'
+            : 'so no details were shared. Your chat remains open.',
+      );
+    }
   });
 });

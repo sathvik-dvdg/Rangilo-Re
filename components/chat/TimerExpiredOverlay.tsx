@@ -2,7 +2,7 @@
 
 import { AnimatePresence, motion } from 'framer-motion';
 import Link from 'next/link';
-import { Hourglass, MessageSquare, Sparkles } from 'lucide-react';
+import { Infinity as InfinityIcon, Sparkles, UserCheck } from 'lucide-react';
 import { Button, buttonVariants } from '@/components/ui/button';
 
 export function Diya({ className }: { className?: string }) {
@@ -20,10 +20,11 @@ export function Diya({ className }: { className?: string }) {
 }
 
 /**
- * Paid Mode only: offers the ₹29 extension, which adds two minutes. Free Mode shows a closed-chat panel in ChatRoom instead.
- * The perks listed here must match what a payment actually grants (lib/payments.ts); identity is never one of them (DEC-002).
+ * Paid Mode only, and only for a room nobody has paid for. Otherwise ChatRoom shows a closed-chat panel, and a paid-for room never expires.
+ * What is listed here must match what the server does with a payment (lib/payments.ts, lib/consent.ts):
+ * the chat becomes unlimited at once, and contact details are shared only if the partner accepts.
  */
-export function TimerExpiredOverlay({ show, onExtend }: { show: boolean; onExtend: () => void }) {
+export function TimerExpiredOverlay({ show, onConnect, partnerName }: { show: boolean; onConnect: () => void; partnerName: string }) {
   return (
     <AnimatePresence>
       {show && (
@@ -52,28 +53,29 @@ export function TimerExpiredOverlay({ show, onExtend }: { show: boolean; onExten
               Your free 2-minute chat preview has ended.
             </p>
 
-            {/* Perks card showing what ₹29 buys */}
+            {/* What ₹29 buys: the chat for certain, contact details only with the partner's agreement */}
             <div className="mt-4 rounded-xl border border-paper/10 bg-ink/60 p-3.5 text-left space-y-2.5">
               <p className="text-[11px] font-bold uppercase tracking-wider text-haldi flex items-center gap-1.5">
                 <Sparkles className="h-3.5 w-3.5 text-haldi" />
-                Keep Going For ₹29:
+                Keep talking to {partnerName} · ₹29
               </p>
 
               <div className="flex items-start gap-2.5 text-xs text-paper/90">
                 <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#7FB069]/20 text-[#9CC587]">
-                  <Hourglass className="h-3.5 w-3.5" />
+                  <InfinityIcon className="h-3.5 w-3.5" />
                 </span>
                 <div>
-                  <strong className="text-paper">2 more minutes:</strong> Added to this chat as soon as you pay.
+                  <strong className="text-paper">No time limit:</strong> this chat reopens as soon as you pay, and stays open.
                 </div>
               </div>
 
               <div className="flex items-start gap-2.5 text-xs text-paper/90">
                 <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-haldi/20 text-haldi">
-                  <MessageSquare className="h-3.5 w-3.5" />
+                  <UserCheck className="h-3.5 w-3.5" />
                 </span>
                 <div>
-                  <strong className="text-paper">Same conversation:</strong> Your messages so far stay right here.
+                  <strong className="text-paper">Contact details:</strong> {partnerName} is asked to share. Only if they accept do you each see the
+                  other&apos;s real name and email.
                 </div>
               </div>
             </div>
@@ -82,10 +84,14 @@ export function TimerExpiredOverlay({ show, onExtend }: { show: boolean; onExten
               variant="haldi"
               size="lg"
               className="mt-5 w-full text-sm font-bold shadow-lg shadow-haldi/20"
-              onClick={onExtend}
+              onClick={onConnect}
             >
-              Extend Chat ₹29 →
+              Connect ₹29 →
             </Button>
+
+            <p className="mt-2 text-[11px] leading-relaxed text-paper/50">
+              Nothing is shared unless they accept. If they decline, the chat stays open and there is no refund.
+            </p>
 
             {/* Paying is optional: always offer a way out next to the offer. */}
             <Link

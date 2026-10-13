@@ -52,7 +52,7 @@ async function readJson(res: Response): Promise<Record<string, unknown>> {
 }
 
 async function verifyPayment(response: RazorpayResponse): Promise<CheckoutResult> {
-  const unverified = failed('We could not verify that payment. If you were charged, it will unlock shortly.');
+  const unverified = failed('We could not verify that payment. If you were charged, your request will be sent shortly.');
   try {
     const res = await fetch('/api/payment/verify', {
       method: 'POST',
@@ -110,9 +110,10 @@ export async function openCheckout({ orderId, amount, currency, keyId, descripti
 }
 
 /**
- * Pays for a ₹29 chat extension. The server creates the order (fixing the
- * amount and what it unlocks) and verifies the signature; the UI only changes
- * after the server says the payment is good.
+ * Pays ₹29 for unlimited chat in one room. The server creates the order (fixing the
+ * amount and what it is for) and verifies the payment; the UI only changes
+ * after the server says the payment is good. Paying also asks the partner to
+ * share contact details; only their answer decides whether any are shared.
  */
 export function useRazorpay() {
   const [busy, setBusy] = useState(false);
@@ -132,7 +133,7 @@ export function useRazorpay() {
       const res = await fetch('/api/payment/create-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'extend', roomId }),
+        body: JSON.stringify({ type: 'connect', roomId }),
       });
       order = await readJson(res);
       if (!res.ok) return fail(typeof order.error === 'string' ? order.error : 'Could not start payment.');
@@ -145,7 +146,7 @@ export function useRazorpay() {
       return fail('Could not start payment.');
     }
 
-    const result = await openCheckout({ orderId, amount, currency, keyId, description: 'Extend Chat', prefill });
+    const result = await openCheckout({ orderId, amount, currency, keyId, description: 'Unlimited chat', prefill });
     if (!result.verified) return fail(result.error);
     setBusy(false);
     return true;

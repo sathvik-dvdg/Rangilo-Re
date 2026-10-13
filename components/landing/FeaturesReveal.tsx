@@ -20,9 +20,9 @@ const features = [
     icon: 'M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm8 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM2 20c0-3 2.7-5 6-5s6 2 6 5m0-5c.6-.1 1.3-.1 2-.1 3.3 0 6 2 6 5',
   },
   {
-    title: '₹29 when it matters',
-    body: 'Unlock their real name and Gmail, or add two more minutes. Paid through Razorpay, checked on our server.',
-    icon: 'M6 4h12M6 9h12M6 4c5 0 7 2 7 5s-3 5-7 5l8 6',
+    title: 'Then the clock stops',
+    body: 'When time runs out the chat closes to new messages. What you already said to each other stays where it is.',
+    icon: 'M7 3h10M7 21h10M8 3c0 5 8 5 8 9s-8 4-8 9M16 3c0 5-8 5-8 9s8 4 8 9',
   },
 ];
 

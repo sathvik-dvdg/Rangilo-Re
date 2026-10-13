@@ -9,20 +9,39 @@ function fmt(ms: number) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-/** Status line, countdown and a thin bar under the header. Haldi while there's time, then orange, then kumkum. */
+/** Status line, countdown and a thin bar under the header. Haldi while there's time, then orange, then kumkum. A paid-for room has no countdown. */
 export function ChatTimer({
   started,
   remaining,
   total,
   fraction,
   waitingFor,
+  unlimited = false,
+  connected = false,
 }: {
   started: boolean;
   remaining: number | null;
   total: number;
   fraction: number;
   waitingFor: string | null;
+  unlimited?: boolean;
+  /** Contact details have been exchanged as well. */
+  connected?: boolean;
 }) {
+  if (unlimited) {
+    return (
+      <div className="px-4 pb-3 pt-0.5 sm:px-5">
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <span className="truncate text-xs font-semibold text-[#9CC587]">{connected ? 'Connected · no time limit' : 'Unlimited chat · no time limit'}</span>
+          <span className="shrink-0 rounded-full border border-[#7FB069]/40 bg-[#7FB069]/10 px-2.5 py-0.5 text-sm font-bold text-[#9CC587]" aria-hidden>
+            ∞
+          </span>
+        </div>
+        <div className="h-1.5 rounded-full bg-[#7FB069]/60" />
+      </div>
+    );
+  }
+
   const closed = remaining === 0;
   const urgent = remaining !== null && !closed && remaining < 30_000;
   const color = !started ? 'bg-paper/20' : fraction > 0.5 ? 'bg-haldi' : fraction > 0.25 ? 'bg-[#D9732F]' : 'bg-kumkum';

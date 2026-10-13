@@ -38,10 +38,22 @@ export type Message = {
   pending?: boolean;
 };
 
+/** The only fields a contact exchange ever shares. Never widen this without a new consent decision (ID-001). */
 export type RevealedIdentity = {
   real_name: string;
   email: string;
-  instagram_handle?: string;
+};
+
+export type ConsentStatus = 'pending' | 'accepted' | 'declined' | 'expired';
+
+/** Where a room's connect request stands, from one participant's side. */
+export type RoomConsent = {
+  /** The latest request in this room; null when nobody has asked. */
+  status: ConsentStatus | null;
+  /** Whether this user sent that request or is the one being asked. */
+  role: 'requester' | 'partner' | null;
+  /** False while a request is open, once connected, or once this user has asked in this room. */
+  canRequest: boolean;
 };
 
 export type RoomState = {
@@ -51,8 +63,16 @@ export type RoomState = {
   messages: Message[];
   timerStartedAt: string | null;
   extraSeconds: number;
+  /** True once the room has been paid for: the chat no longer expires, whatever the partner answers. */
+  unlimited: boolean;
+  consent: RoomConsent;
+  /** The partner's contact details. Set only when a contact_reveals row exists for the pair. */
   revealed: RevealedIdentity | null;
 };
 
-/** Paid products. Identity sharing is never one of them (DEC-002). */
-export type PaymentType = 'extend';
+/**
+ * Paid products. 'connect' makes the chat unlimited and asks the partner to
+ * exchange contact details. The payment never discloses anything itself;
+ * only the partner's consent does (DEC-002 as revised 2026-10-14, ID-002).
+ */
+export type PaymentType = 'connect';

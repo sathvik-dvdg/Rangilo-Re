@@ -390,7 +390,7 @@ export function OnboardingModal({
                         </p>
                       </div>
                       <p className="mt-1.5 text-xs text-paper/60 leading-relaxed">
-                        These remain hidden from other dancers. Paying never unlocks them.
+                        These stay hidden from other dancers. They are shared with one dancer only if you both agree to exchange contact details.
                       </p>
 
                       <div className="mt-3.5 space-y-3">

@@ -43,7 +43,7 @@ The name shown on the sign-in screen ("Sign in to …") is the application name 
 1. Create a project and copy the URL, the anon key and the service-role key.
 2. Under **Authentication → Sign In / Providers → Third-party auth**, add **Clerk** and paste your Clerk domain. Browser requests then carry the Clerk session token, and RLS reads the Clerk user id from `auth.jwt()->>'sub'`.
 3. Set `NEXT_PUBLIC_SUPABASE_URL` to the **Project URL** only (`https://<ref>.supabase.co`). Don't add `/rest/v1` and don't use the dashboard link. If the URL or keys are wrong, or the tables are missing, `/dashboard` and `/chat` show a screen saying exactly which one, and API routes return `503`.
-4. Run `supabase/migrations/0001_init.sql` in the SQL editor. It creates the tables, RLS policies and the Realtime publication. Schema changes go in new numbered migration files; never edit one that has been applied.
+4. Run `supabase/migrations/0001_init.sql` in the SQL editor. It creates the tables, RLS policies and the Realtime publication. Then run `0004_campus_branch.sql` and `0005_campus_vibe_outfit_instagram.sql` (campus profile fields). Schema changes go in new numbered migration files; never edit one that has been applied.
 
 ### 3. Razorpay (optional, off by default)
 
@@ -66,14 +66,16 @@ The server decides the mode in one place, [`lib/billing.ts`](lib/billing.ts), fr
 
 **Do not enable Paid Mode in production.** The gates in `OBJECTIVES.md` §8 (written provider eligibility, policies, payment testing, monitoring, legal review) and follow-ups FU-001 to FU-003 are not met.
 
-To work on Paid Mode with test keys: copy the key id and secret from Razorpay Dashboard → Settings → API Keys (test mode), add a webhook at `https://<your-domain>/api/webhooks/razorpay` for `payment.captured` and `payment.failed`, put its secret in `RAZORPAY_WEBHOOK_SECRET`, run `supabase/migrations/0002_payment_orders.sql` and then `0003_fulfilment_failed_and_webhook_events.sql` in the SQL editor (the payment ledger and the webhook event log), and set `BILLING_MODE=paid`. The only paid product is the ₹29 chat extension.
+To work on Paid Mode with test keys: copy the key id and secret from Razorpay Dashboard → Settings → API Keys (test mode), add a webhook at `https://<your-domain>/api/webhooks/razorpay` for `payment.captured` and `payment.failed`, put its secret in `RAZORPAY_WEBHOOK_SECRET`, run `supabase/migrations/0002_payment_orders.sql`, `0003_fulfilment_failed_and_webhook_events.sql` and then `0006_contact_consent.sql` in the SQL editor (the payment ledger, the webhook event log, and connect requests), and set `BILLING_MODE=paid`.
+
+The only paid product costs ₹29 and is bought once per room. A confirmed payment does two things: it removes the time limit on that chat at once (`rooms.unlimited`), and it asks the other dancer to share contact details. If they accept, each sees the other's real name and email. If they decline, or don't answer within 24 hours, nothing is shared, the chat stays unlimited and there is no refund. The only refund case is a payment that was captured but did not unlock the chat: list `payment_orders` where `status = 'fulfilment_failed'`, refund in the Razorpay dashboard, and set the row to `refunded`.
 
 ## Checks
 
 ```bash
 npm run typecheck    # tsc --noEmit
 npm run lint         # next lint
-npm test             # Vitest: billing config, payment routes, chat expiry, Free Mode smoke
+npm test             # Vitest: billing config, payment routes, consent flow, chat expiry, Free Mode smoke
 npm run test:smoke   # only the Free Mode smoke test
 npm run build
 ```
@@ -91,23 +93,27 @@ app/
   (main)/dashboard                 dancer list, onboarding sheet, server actions
   (main)/chat/[roomId]             chat room
   api/users                        public profile list (no name/email)
-  api/rooms/[roomId]               room state; /messages, /read, /timer
+  api/rooms/[roomId]               room state; /messages, /read, /timer, /consent (answer a request to share contact details)
+  api/users/[userId]/contact       real name + email, only after both agreed (404 otherwise)
+  api/reveals                      who you are connected with, and who is waiting for your answer
   api/payment/create-order|verify  Razorpay order + signature check (Paid Mode only)
   api/webhooks/razorpay            signature-checked webhook (grants only in Paid Mode)
 components/3d | landing | dashboard | chat | modals | layout | ui
 hooks/  useChatTimer, useFocusTrap, useLenis, useLobbyPresence, useRazorpay, useSupabase, useSupabaseRealtime
-lib/    billing, supabase (browser), supabaseAdmin, razorpay, payments, server, displayNames, room
+lib/    billing, supabase (browser), supabaseAdmin, razorpay, payments, consent, server, displayNames, room
 store/  useAppStore (zustand)
-tests/  billing, payment-routes, chat-expiry, smoke/free-mode
+tests/  billing, payment-routes, consent-flow, chat-expiry, campus-privacy, refund-policy, smoke/free-mode
 docs/   ui-ux-audit.md
 ```
 
 ### Privacy and data access
 
-- The browser can't read another user's `real_name` or `email`. The only RLS policy on `users` lets you read your own row, and the dancer list comes from `/api/users`, which selects public columns only.
+- The browser can't read another user's `real_name` or `email` from the database. The only RLS policy on `users` lets you read your own row, and the dancer list comes from `/api/users`, which selects public columns only.
+- Two people see each other's real name and email only after one has paid and the other has accepted the request to share them. The server returns those two fields, and nothing else, when a `contact_reveals` row exists for the pair (`lib/consent.ts`). A payment on its own never reveals anything.
+- Nothing about identity or payments is kept in `localStorage`, `sessionStorage` or cookies; it comes from the server on every load.
 - All writes (messages, timer start, read receipts) go through route handlers that use the service-role key after checking who is calling. The browser client only reads what RLS allows and listens on Realtime.
 - Secrets stay server-side: modules that read them import `server-only`, and the only `NEXT_PUBLIC_*` values are public identifiers: the Clerk publishable key and route URLs, the Supabase URL and anon key, and the Razorpay key id.
-- Not yet true, and tracked in `OBJECTIVES.md`: consent-based identity sharing (ID-001 to ID-004), private Realtime channels (PRIV-005), account deletion and retention (PRIV-004).
+- Not yet true, and tracked in `OBJECTIVES.md`: revoking a contact exchange and choosing which fields to share (ID-003), private Realtime channels (PRIV-005), account deletion and retention (PRIV-004).
 
 ### Chat rules
 
