@@ -50,7 +50,20 @@ function Row({ index, style, data }: ListChildComponentProps<RowData>) {
         onClick={() => data.open(u)}
         className="flex h-[88px] w-full items-center gap-3.5 rounded-lg px-3 text-left transition-colors hover:bg-paper/[0.04]"
       >
-        <Avatar name={u.display_name} gender={u.gender} online={online} />
+        <div className="relative shrink-0">
+          <Avatar name={u.display_name} gender={u.gender} online={online} />
+          {!unlocked && (
+            <span
+              title="Identity Locked (Real identity hidden)"
+              className={cn(
+                'absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full border bg-kumkum text-paper shadow-sm',
+                online ? 'border-[#7FB069] ring-1 ring-[#7FB069]/60' : 'border-ink',
+              )}
+            >
+              <Lock className="h-2.5 w-2.5" />
+            </span>
+          )}
+        </div>
 
         <div className="min-w-0 flex-1 border-b border-paper/[0.07] pb-2 pt-2">
           {/* Top line: Name, Unlocked badge (if revealed), Gender, Branch, Vibe */}
