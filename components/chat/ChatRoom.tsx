@@ -20,7 +20,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { cn } from '@/lib/utils';
 import type { Message, RoomState } from '@/lib/types';
 
-export function ChatRoom({ initial, billingEnabled }: { initial: RoomState; billingEnabled: boolean }) {
+export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: RoomState; billingEnabled: boolean; renderedAt?: number }) {
   const { roomId, me, partner } = initial;
   const [messages, setMessages] = useState<Message[]>(initial.messages);
   const [timerStartedAt, setTimerStartedAt] = useState(initial.timerStartedAt);
@@ -36,7 +36,7 @@ export function ChatRoom({ initial, billingEnabled }: { initial: RoomState; bill
   const bottom = useRef<HTMLDivElement>(null);
   const { pay, busy, error: payError, clearError } = useRazorpay();
 
-  const timer = useChatTimer(timerStartedAt, extraSeconds);
+  const timer = useChatTimer(timerStartedAt, extraSeconds, renderedAt);
 
   const refresh = useCallback(async () => {
     const res = await fetch(`/api/rooms/${encodeURIComponent(roomId)}`);

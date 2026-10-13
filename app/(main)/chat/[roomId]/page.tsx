@@ -19,7 +19,7 @@ export default async function ChatPage({ params }: { params: { roomId: string } 
   try {
     const state = await getRoomState(decodeURIComponent(params.roomId), userId);
     // Only hides or shows payment UI; the billing routes enforce the mode themselves.
-    return <ChatRoom key={state.roomId} initial={state} billingEnabled={getBillingStatus().mode === 'paid'} />;
+    return <ChatRoom key={state.roomId} initial={state} billingEnabled={getBillingStatus().mode === 'paid'} renderedAt={Date.now()} />;
   } catch (e) {
     if (e instanceof HttpError && e.status === 409) redirect('/dashboard');
     const message = e instanceof HttpError ? e.message : 'Could not open this chat';
