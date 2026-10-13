@@ -171,5 +171,7 @@ describe('control: the same render in Paid Mode does show payment UI', () => {
     const html = await renderChat();
     expect(html).not.toMatch(/Reveal Identity/i);
     expect(html).toMatch(/Extend Chat ₹29/);
+    // The offer is never a dead end: a visible way back sits next to it (not just the header icon's label).
+    expect(html).toMatch(/>Back to dancers<\/a>/);
   });
 });

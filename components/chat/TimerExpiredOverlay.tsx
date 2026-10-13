@@ -1,7 +1,8 @@
 'use client';
 
 import { AnimatePresence, motion } from 'framer-motion';
-import { Button } from '@/components/ui/button';
+import Link from 'next/link';
+import { Button, buttonVariants } from '@/components/ui/button';
 
 export function Diya({ className }: { className?: string }) {
   return (
@@ -37,6 +38,10 @@ export function TimerExpiredOverlay({ show, onExtend }: { show: boolean; onExten
             <Button variant="haldi" size="lg" className="mt-6 w-full" onClick={onExtend}>
               Extend Chat ₹29 →
             </Button>
+            {/* Paying is optional: always offer a way out next to the offer. */}
+            <Link href="/dashboard" className={buttonVariants({ variant: 'ghost', className: 'mt-2 w-full' })}>
+              Back to dancers
+            </Link>
           </motion.div>
         </motion.div>
       )}
