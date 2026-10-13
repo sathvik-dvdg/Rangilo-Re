@@ -9,9 +9,14 @@ export function RevealCard({ identity }: { identity: RevealedIdentity | null }) 
   return (
     <AnimatePresence initial={false}>
       {identity && (
-        <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden px-4">
-          <div className="thread-border mb-3 rounded-lg px-4 py-3">
-            <p className="text-xs font-bold uppercase tracking-[0.2em] text-haldi">🔓 Identity Unlocked</p>
+        <motion.div initial={{ opacity: 0, height: 0, scale: 0.98 }} animate={{ opacity: 1, height: 'auto', scale: 1 }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.4, ease: 'easeOut' }} className="overflow-hidden px-4">
+          <div className="mb-3 rounded-xl border border-haldi/40 bg-gradient-to-r from-haldi/15 via-ink-2 to-kumkum/15 px-4 py-3 shadow-[0_0_25px_rgba(216,162,58,0.25)]">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-extrabold uppercase tracking-[0.18em] text-haldi flex items-center gap-1.5">
+                🎉 🔓 Identity Unlocked! 🎊
+              </p>
+              <span className="text-xs animate-bounce">🪅</span>
+            </div>
             <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
               <dt className="text-paper/50">Name</dt>
               <dd className="font-semibold text-paper">{identity.real_name || '—'}</dd>

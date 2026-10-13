@@ -2,6 +2,7 @@
 
 import { AnimatePresence, motion } from 'framer-motion';
 import Link from 'next/link';
+import { Hourglass, MessageSquare, Sparkles } from 'lucide-react';
 import { Button, buttonVariants } from '@/components/ui/button';
 
 export function Diya({ className }: { className?: string }) {
@@ -18,7 +19,10 @@ export function Diya({ className }: { className?: string }) {
   );
 }
 
-/** Paid Mode only: offers the extension. Free Mode shows a closed-chat panel in ChatRoom instead. */
+/**
+ * Paid Mode only: offers the ₹29 extension, which adds two minutes. Free Mode shows a closed-chat panel in ChatRoom instead.
+ * The perks listed here must match what a payment actually grants (lib/payments.ts); identity is never one of them (DEC-002).
+ */
 export function TimerExpiredOverlay({ show, onExtend }: { show: boolean; onExtend: () => void }) {
   return (
     <AnimatePresence>
@@ -27,19 +31,67 @@ export function TimerExpiredOverlay({ show, onExtend }: { show: boolean; onExten
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="absolute inset-0 z-10 flex items-center justify-center bg-ink/70 px-6 backdrop-blur-sm"
+          className="absolute inset-0 z-10 flex items-center justify-center bg-ink/80 px-6 backdrop-blur-md"
         >
-          <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.1 }} className="max-w-xs text-center">
-            <motion.div animate={{ y: [0, -10, 0] }} transition={{ repeat: Infinity, duration: 1.4, ease: 'easeInOut' }} className="mx-auto w-16">
+          <motion.div
+            initial={{ y: 20, opacity: 0, scale: 0.95 }}
+            animate={{ y: 0, opacity: 1, scale: 1 }}
+            transition={{ delay: 0.1 }}
+            className="w-full max-w-sm rounded-2xl border border-haldi/25 bg-ink-2/95 p-6 text-center shadow-2xl backdrop-blur-md"
+          >
+            <motion.div
+              animate={{ y: [0, -8, 0] }}
+              transition={{ repeat: Infinity, duration: 1.6, ease: 'easeInOut' }}
+              className="mx-auto w-16"
+            >
               <Diya className="h-16 w-16" />
             </motion.div>
-            <h2 className="mt-4 font-display text-3xl text-paper">Time&apos;s Up! 🪔</h2>
-            <p className="mt-2 text-paper/70">Your free 2-minute chat has ended. Continue dancing together?</p>
-            <Button variant="haldi" size="lg" className="mt-6 w-full" onClick={onExtend}>
+
+            <h2 className="mt-3 font-display text-2xl font-bold text-paper sm:text-3xl">Time&apos;s Up! 🪔</h2>
+            <p className="mt-1 text-sm text-paper/70">
+              Your free 2-minute chat preview has ended.
+            </p>
+
+            {/* Perks card showing what ₹29 buys */}
+            <div className="mt-4 rounded-xl border border-paper/10 bg-ink/60 p-3.5 text-left space-y-2.5">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-haldi flex items-center gap-1.5">
+                <Sparkles className="h-3.5 w-3.5 text-haldi" />
+                Keep Going For ₹29:
+              </p>
+
+              <div className="flex items-start gap-2.5 text-xs text-paper/90">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#7FB069]/20 text-[#9CC587]">
+                  <Hourglass className="h-3.5 w-3.5" />
+                </span>
+                <div>
+                  <strong className="text-paper">2 more minutes:</strong> Added to this chat as soon as you pay.
+                </div>
+              </div>
+
+              <div className="flex items-start gap-2.5 text-xs text-paper/90">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-haldi/20 text-haldi">
+                  <MessageSquare className="h-3.5 w-3.5" />
+                </span>
+                <div>
+                  <strong className="text-paper">Same conversation:</strong> Your messages so far stay right here.
+                </div>
+              </div>
+            </div>
+
+            <Button
+              variant="haldi"
+              size="lg"
+              className="mt-5 w-full text-sm font-bold shadow-lg shadow-haldi/20"
+              onClick={onExtend}
+            >
               Extend Chat ₹29 →
             </Button>
+
             {/* Paying is optional: always offer a way out next to the offer. */}
-            <Link href="/dashboard" className={buttonVariants({ variant: 'ghost', className: 'mt-2 w-full' })}>
+            <Link
+              href="/dashboard"
+              className={buttonVariants({ variant: 'ghost', className: 'mt-2.5 w-full text-xs text-paper/60 hover:text-paper' })}
+            >
               Back to dancers
             </Link>
           </motion.div>

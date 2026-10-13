@@ -19,6 +19,7 @@ import { useRazorpay } from '@/hooks/useRazorpay';
 import { useAppStore } from '@/store/useAppStore';
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { fireCelebration } from '@/lib/confetti';
 import type { Message, RoomState } from '@/lib/types';
 
 // Openers offered in an empty room; tapping one fills the composer without sending.
@@ -72,7 +73,10 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
     onMessage: upsert,
     onMessageUpdate: upsert,
     onTimerStart: setTimerStartedAt,
-    onExtension: () => void refresh(),
+    onExtension: () => {
+      void refresh();
+      fireCelebration();
+    },
   });
 
   // Start the clock once both have spoken and both are in the room.
@@ -158,6 +162,7 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
     if (!(await pay(roomId))) return;
     setSheet(null);
     await refresh();
+    fireCelebration();
     setToast('+2 minutes added');
   };
 
