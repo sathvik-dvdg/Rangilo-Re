@@ -38,11 +38,22 @@ html.lenis body {
   overflow: hidden;
 }
 
-@media (pointer: fine) {
+@media (pointer: fine) and (hover: hover) {
   body.has-custom-cursor,
   body.has-custom-cursor a,
-  body.has-custom-cursor button {
+  body.has-custom-cursor button,
+  body.has-custom-cursor [role='button'],
+  body.has-custom-cursor label,
+  body.has-custom-cursor summary,
+  body.has-custom-cursor select,
+  body.has-custom-cursor input {
     cursor: none;
+  }
+  /* Text entry keeps the system I-beam; CustomCursor hides the sticks there. */
+  body.has-custom-cursor textarea,
+  body.has-custom-cursor [contenteditable]:not([contenteditable='false']),
+  body.has-custom-cursor input:not([type='checkbox']):not([type='radio']):not([type='submit']):not([type='button']):not([type='reset']):not([type='range']):not([type='color']):not([type='file']):not([type='image']) {
+    cursor: text;
   }
 }
 
