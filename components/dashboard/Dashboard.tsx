@@ -28,7 +28,7 @@ const FILTERS: { id: Filter; label: string }[] = [
 const BRANCH_OPTIONS = ['All Branches', 'CSE', 'ISE', 'AIML', 'ECE', 'MECH', 'CIVIL', 'AIDS'];
 const YEAR_OPTIONS = ['All Years', '1st Year', '2nd Year', '3rd Year', '4th Year'];
 
-const ROW = 96;
+const ROW = 104;
 
 type RowData = {
   items: PublicProfile[];
@@ -48,23 +48,35 @@ function Row({ index, style, data }: ListChildComponentProps<RowData>) {
         animate={{ opacity: 1, x: 0 }}
         transition={{ delay: Math.min(index, 15) * 0.04 }}
         onClick={() => data.open(u)}
-        className="flex h-[88px] w-full items-center gap-3.5 rounded-lg px-3 text-left transition-colors hover:bg-paper/[0.04]"
+        className="group flex h-[96px] w-full items-center gap-3.5 rounded-xl border border-paper/[0.06] bg-ink-2/60 px-3.5 text-left transition-all hover:border-haldi/40 hover:bg-paper/[0.04]"
       >
-        <Avatar name={u.display_name} gender={u.gender} online={online} />
-        <div className="min-w-0 flex-1 border-b border-paper/[0.07] pb-2 pt-2">
+        <div className="relative shrink-0">
+          <Avatar name={u.display_name} gender={u.gender} online={online} />
+          {!unlocked && (
+            <span
+              title="Profile Locked"
+              className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full border border-ink bg-kumkum text-paper shadow-sm"
+            >
+              <Lock className="h-2.5 w-2.5" />
+            </span>
+          )}
+        </div>
+
+        <div className="min-w-0 flex-1">
+          {/* Top line: Name, Locked badge, Gender, Branch, Vibe */}
           <div className="flex items-center gap-1.5 flex-wrap">
-            <p className="truncate font-display text-[15px] text-paper">
+            <p className="truncate font-display text-[15px] font-semibold text-paper">
               {unlocked?.real_name ? unlocked.real_name : u.display_name}
             </p>
             {unlocked ? (
-              <span className="flex items-center gap-1 rounded bg-haldi/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-haldi">
+              <span className="flex items-center gap-1 rounded bg-[#7FB069]/20 border border-[#7FB069]/30 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#9CC587]">
                 <Unlock className="h-2.5 w-2.5" />
                 Unlocked
               </span>
             ) : (
-              <span className="flex items-center gap-1 rounded-full border border-paper/15 bg-paper/[0.05] px-1.5 py-0.5 text-[9px] font-semibold text-paper/60">
-                <Lock className="h-2.5 w-2.5 text-kumkum/80" />
-                Locked
+              <span className="flex items-center gap-1 rounded-full border border-kumkum/40 bg-kumkum/15 px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-wider text-[#FF9E94]">
+                <Lock className="h-2.5 w-2.5 text-kumkum" />
+                Locked Profile
               </span>
             )}
             <GenderBadge gender={u.gender} />
@@ -74,34 +86,55 @@ function Row({ index, style, data }: ListChildComponentProps<RowData>) {
               </span>
             )}
             {u.vibe_tag && (
-              <span className="rounded-full bg-haldi/10 border border-haldi/25 px-2 py-0.5 text-[10px] font-medium text-haldi truncate max-w-[170px]">
+              <span className="rounded-full bg-haldi/10 border border-haldi/25 px-2 py-0.5 text-[10px] font-medium text-haldi truncate max-w-[150px]">
                 {u.vibe_tag}
               </span>
             )}
           </div>
-          <div className="mt-1 flex items-center justify-between gap-2 text-xs">
-            <div className="min-w-0 flex-1 truncate">
-              {u.outfit_color ? (
-                <span className="truncate text-paper/75">
-                  👘 <span className="italic">{u.outfit_color}</span>
-                </span>
-              ) : (
-                <span className={cn('truncate', online ? 'text-[#9CC587]' : 'text-paper/45')}>
-                  {online ? 'On the floor now' : `Seen ${timeAgo(u.last_seen)}`}
-                </span>
-              )}
-            </div>
-            {u.outfit_color && (
-              <span className={cn('shrink-0 text-[11px]', online ? 'text-[#9CC587]' : 'text-paper/40')}>
-                {online ? 'Online' : timeAgo(u.last_seen)}
+
+          {/* Bottom line: Locked teaser info / Outfit */}
+          <div className="mt-1.5 flex items-center gap-2 text-xs truncate">
+            {unlocked ? (
+              <span className="truncate text-paper/80 font-medium">
+                {unlocked.email} {u.outfit_color && `· 👘 ${u.outfit_color}`}
               </span>
-            )}
-            {unlocked?.email && (
-              <span className="shrink-0 text-[11px] text-paper/50">
-                {unlocked.email}
-              </span>
+            ) : (
+              <div className="min-w-0 flex items-center gap-1.5 truncate text-[11px] text-paper/60">
+                <span className="text-paper/40 font-medium">Real Identity:</span>
+                <span className="font-semibold text-[#FF9E94] flex items-center gap-0.5">
+                  <Lock className="h-2.5 w-2.5" /> Hidden
+                </span>
+                {u.outfit_color ? (
+                  <span className="truncate text-paper/70">
+                    · 👘 <span className="italic">{u.outfit_color}</span>
+                  </span>
+                ) : (
+                  <span className="text-paper/40 truncate">
+                    · Unlock in chat for ₹29
+                  </span>
+                )}
+              </div>
             )}
           </div>
+        </div>
+
+        {/* Right CTA / Action button */}
+        <div className="shrink-0 flex flex-col items-end justify-center pl-1">
+          {unlocked ? (
+            <span className="flex items-center gap-1 rounded-lg border border-[#7FB069]/40 bg-[#7FB069]/15 px-2.5 py-1 text-xs font-bold text-[#9CC587] group-hover:bg-[#7FB069] group-hover:text-ink transition-colors">
+              Chat Now →
+            </span>
+          ) : (
+            <div className="flex flex-col items-end">
+              <span className="flex items-center gap-1 rounded-lg border border-haldi/40 bg-haldi/15 px-2.5 py-1 text-xs font-extrabold text-haldi shadow-sm group-hover:bg-haldi group-hover:text-ink transition-colors">
+                <Lock className="h-3 w-3 text-haldi group-hover:text-ink" />
+                Unlock ₹29
+              </span>
+              <span className={cn('text-[10px] mt-1 font-medium', online ? 'text-[#9CC587]' : 'text-paper/40')}>
+                {online ? 'Online now' : timeAgo(u.last_seen)}
+              </span>
+            </div>
+          )}
         </div>
       </motion.button>
     </div>
@@ -353,7 +386,21 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
             </div>
           </div>
 
-          <div ref={listWrap} className="mx-auto mt-3 w-full max-w-3xl flex-1 overflow-hidden px-3 sm:px-5">
+          {/* Lobby Locked Profiles Notice */}
+          <div className="mx-auto w-full max-w-3xl px-4 pt-3 sm:px-6">
+            <div className="flex items-center justify-between gap-2.5 rounded-xl border border-haldi/20 bg-ink-2/80 px-3.5 py-2 text-xs text-paper/75 shadow-sm">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-haldi/15 text-haldi">
+                  <Lock className="h-3 w-3" />
+                </span>
+                <p className="leading-snug">
+                  <strong className="text-haldi font-bold">Anonymous Lobby:</strong> All dancer profiles are locked. Tap anyone to start a 2-min chat, then unlock their real identity for ₹29!
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div ref={listWrap} className="mx-auto mt-2 w-full max-w-3xl flex-1 overflow-hidden px-3 sm:px-5">
             {error ? (
               <div role="alert" className="flex flex-col items-start gap-4 p-6 text-paper/75">
                 <p>{error}</p>
