@@ -9,6 +9,8 @@ type Handlers = {
   onMessageUpdate: (m: Message) => void;
   onTimerStart: (iso: string) => void;
   onExtension: (extraSeconds: number) => void;
+  /** A request to see a name and photo was made or answered. Row-level security only delivers the user's own. */
+  onRevealChange?: () => void;
 };
 
 /**
@@ -40,6 +42,7 @@ export function useRoomRealtime(roomId: string, userId: string | null, handlers:
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_extensions', filter: `room_id=eq.${roomId}` }, (p) =>
         h.current.onExtension((p.new as { extra_seconds: number }).extra_seconds),
       )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reveal_requests' }, () => h.current.onRevealChange?.())
       .on('presence', { event: 'sync' }, () => setPresentIds(Object.keys(channel.presenceState())))
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') await channel.track({ at: Date.now() });

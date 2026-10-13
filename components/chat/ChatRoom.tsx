@@ -9,9 +9,11 @@ import { GenderBadge } from '@/components/ui/GenderBadge';
 import { ChatTimer } from './ChatTimer';
 import { MessageBubble } from './MessageBubble';
 import { RevealCard } from './RevealCard';
+import { RevealPanel } from './RevealPanel';
 import { RoomSidebar } from './RoomSidebar';
 import { TimerExpiredOverlay } from './TimerExpiredOverlay';
 import { ExtendModal } from '@/components/modals/ExtendModal';
+import { RevealModal } from '@/components/modals/RevealModal';
 import { Toast } from '@/components/ui/Toast';
 import { useRoomRealtime } from '@/hooks/useSupabaseRealtime';
 import { useChatTimer } from '@/hooks/useChatTimer';
@@ -30,16 +32,31 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
   const [messages, setMessages] = useState<Message[]>(initial.messages);
   const [timerStartedAt, setTimerStartedAt] = useState(initial.timerStartedAt);
   const [extraSeconds, setExtraSeconds] = useState(initial.extraSeconds);
-  const storedReveal = useAppStore((s) => s.revealed[partner.clerk_id]);
-  const setRevealedInStore = useAppStore((s) => s.setRevealed);
-  const revealed = storedReveal ?? initial.revealed;
+  // Both come from the server only: what my partner agreed to show me, and where each request stands.
+  const [revealed, setRevealed] = useState(initial.revealed);
+  const [reveal, setReveal] = useState(initial.reveal);
+  const [revealBusy, setRevealBusy] = useState(false);
+  const [revealError, setRevealError] = useState<string | null>(null);
 
   const [text, setText] = useState('');
-  const [sheet, setSheet] = useState<'extend' | null>(null);
+  const [sheet, setSheet] = useState<'extend' | 'reveal' | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLInputElement>(null);
+
+  // Opening the chat clears this partner's unread badge (NOTIF-001), once the tab is actually on screen.
+  const clearUnread = useAppStore((s) => s.clearUnread);
+  const partnerUnread = useAppStore((s) => s.unread[partner.clerk_id] ?? 0);
+  useEffect(() => {
+    if (!partnerUnread) return;
+    const clear = () => {
+      if (document.visibilityState === 'visible') clearUnread(partner.clerk_id);
+    };
+    clear();
+    document.addEventListener('visibilitychange', clear);
+    return () => document.removeEventListener('visibilitychange', clear);
+  }, [partnerUnread, partner.clerk_id, clearUnread]);
   const { pay, busy, error: payError, clearError } = useRazorpay();
 
   const timer = useChatTimer(timerStartedAt, extraSeconds, renderedAt);
@@ -52,8 +69,29 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
     const s = (await res.json()) as RoomState;
     setTimerStartedAt(s.timerStartedAt);
     setExtraSeconds(s.extraSeconds);
-    if (s.revealed) setRevealedInStore(partner.clerk_id, s.revealed);
-  }, [roomId, partner.clerk_id, setRevealedInStore]);
+    setRevealed(s.revealed);
+    setReveal(s.reveal);
+  }, [roomId]);
+
+  // Ask to see my partner's name and photo, or answer their request to see mine (ID-001).
+  const revealAction = async (action: 'request' | 'allow' | 'decline') => {
+    setRevealBusy(true);
+    setRevealError(null);
+    try {
+      const res = await fetch(`/api/rooms/${encodeURIComponent(roomId)}/reveal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { reveal?: RoomState['reveal']; error?: string };
+      if (res.ok && data.reveal) setReveal(data.reveal);
+      else setRevealError(data.error ?? 'That did not go through. Try again.');
+    } catch {
+      setRevealError('That did not go through. Check your connection.');
+    } finally {
+      setRevealBusy(false);
+    }
+  };
 
   const upsert = useCallback((m: Message) => {
     setMessages((prev) => {
@@ -77,6 +115,7 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
       void refresh();
       fireCelebration();
     },
+    onRevealChange: () => void refresh(),
   });
 
   // Start the clock once both have spoken and both are in the room.
@@ -157,18 +196,19 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
     });
   };
 
-  const startPayment = async () => {
+  const startPayment = async (type: 'extend' | 'reveal') => {
     if (!billingEnabled) return;
-    if (!(await pay(roomId))) return;
+    if (!(await pay(roomId, type))) return;
     setSheet(null);
+    // Whatever was bought shows up only because the server now reports it (PAY-014).
     await refresh();
     fireCelebration();
-    setToast('+2 minutes added');
+    setToast(type === 'reveal' ? 'Name and photo shared with you' : '+2 minutes added');
   };
 
-  const openSheet = () => {
+  const openSheet = (which: 'extend' | 'reveal') => {
     clearError();
-    setSheet('extend');
+    setSheet(which);
   };
 
   const waitingFor = !timer.started
@@ -201,13 +241,11 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
             <Link href="/dashboard" aria-label="Back to dancers" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-paper/70 transition-colors hover:bg-paper/5 hover:text-paper">
               <ChevronLeft className="h-6 w-6" />
             </Link>
-            <Avatar name={partner.display_name} gender={partner.gender} size={44} online={partnerHere} />
+            <Avatar name={partner.display_name} gender={partner.gender} imageUrl={revealed?.image_url} size={44} online={partnerHere} />
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 items-center gap-2">
                 <p className="truncate font-display text-[15px] text-paper sm:text-base">{revealed?.real_name ? revealed.real_name : partner.display_name}</p>
-                {revealed && (
-                  <span className="shrink-0 rounded bg-haldi/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-haldi">Unlocked</span>
-                )}
+                {revealed && <span className="shrink-0 rounded bg-haldi/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-haldi">Shared</span>}
                 <GenderBadge gender={partner.gender} className="shrink-0" />
                 {partner.vibe_tag && (
                   <span className="hidden shrink-0 rounded-full border border-haldi/25 bg-haldi/10 px-2 py-0.5 text-[10px] font-medium text-haldi sm:inline-flex lg:hidden">
@@ -228,7 +266,20 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
               </p>
             </div>
           </div>
-          <RevealCard identity={revealed} />
+          <RevealCard identity={revealed} nickname={partner.display_name} gender={partner.gender} />
+          {billingEnabled && (
+            <RevealPanel
+              reveal={reveal}
+              partnerName={firstName}
+              me={{ name: me.display_name, gender: me.gender }}
+              canAsk={bothSpoke}
+              busy={revealBusy}
+              error={revealError}
+              onRequest={() => void revealAction('request')}
+              onAnswer={(allow) => void revealAction(allow ? 'allow' : 'decline')}
+              onBuy={() => openSheet('reveal')}
+            />
+          )}
           <ChatTimer started={timer.started} remaining={timer.remaining} total={timer.total} fraction={timer.fraction} waitingFor={waitingFor} />
         </header>
 
@@ -275,7 +326,7 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
               <div ref={bottom} />
             </div>
           </div>
-          {billingEnabled && <TimerExpiredOverlay show={timer.expired && sheet === null} onExtend={openSheet} />}
+          {billingEnabled && <TimerExpiredOverlay show={timer.expired && sheet === null} onExtend={() => openSheet('extend')} />}
         </div>
 
         {closedFree ? (
@@ -337,10 +388,16 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
         bothSpoke={bothSpoke}
         started={timer.started}
         expired={timer.expired}
+        revealed={revealed}
         className="relative hidden lg:flex"
       />
 
-      {billingEnabled && <ExtendModal open={sheet === 'extend'} onClose={() => setSheet(null)} onPay={startPayment} busy={busy} error={payError} />}
+      {billingEnabled && (
+        <>
+          <ExtendModal open={sheet === 'extend'} onClose={() => setSheet(null)} onPay={() => void startPayment('extend')} busy={busy} error={payError} />
+          <RevealModal open={sheet === 'reveal'} partnerName={firstName} onClose={() => setSheet(null)} onPay={() => void startPayment('reveal')} busy={busy} error={payError} />
+        </>
+      )}
       <Toast message={toast} onDone={() => setToast(null)} />
     </main>
   );

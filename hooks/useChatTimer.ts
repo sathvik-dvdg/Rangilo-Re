@@ -26,6 +26,8 @@ export function useChatTimer(timerStart: string | null, extraSeconds: number, re
     total,
     started: timerStart !== null,
     expired: remaining === 0,
-    fraction: remaining === null ? 1 : remaining / total,
+    // Against one free-chat window, not the whole chat: an extension bought after a long gap makes
+    // `total` large, and the bar should still read as two minutes left, not as nearly empty.
+    fraction: remaining === null ? 1 : Math.min(1, remaining / FREE_CHAT_MS),
   };
 }

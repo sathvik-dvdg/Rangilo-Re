@@ -23,7 +23,6 @@ vi.mock('@/lib/supabaseAdmin', () => ({
 }));
 
 import { GET as getUsers } from '@/app/api/users/route';
-import { getRevealed } from '@/lib/server';
 import { completeOnboarding } from '@/app/(main)/dashboard/actions';
 
 describe('Campus Profiles & Privacy Rules', () => {
@@ -92,72 +91,7 @@ describe('Campus Profiles & Privacy Rules', () => {
     });
   });
 
-  describe('Pre-existing reveals rows (DEC-003)', () => {
-    it('never selects or returns instagram_handle for a reveals row (PRIV-001, ID-001)', async () => {
-      mocks.supabaseFrom.mockImplementation((table: string) => {
-        if (table === 'reveals') {
-          return {
-            select: () => ({
-              eq: () => ({
-                eq: () => ({
-                  maybeSingle: () => Promise.resolve({ data: { id: 'rev_1' }, error: null }),
-                }),
-              }),
-            }),
-          };
-        }
-        if (table === 'users') {
-          return {
-            select: (cols: string) => {
-              expect(cols).not.toContain('instagram_handle');
-              expect(cols).toContain('real_name');
-              expect(cols).toContain('email');
-              return {
-                eq: () => ({
-                  single: () =>
-                    Promise.resolve({
-                      data: {
-                        real_name: 'Bob Sharma',
-                        email: 'bob@example.com',
-                      },
-                      error: null,
-                    }),
-                }),
-              };
-            },
-          };
-        }
-        return {};
-      });
-
-      const identity = await getRevealed('user_alice', 'user_bob');
-      expect(identity).toEqual({
-        real_name: 'Bob Sharma',
-        email: 'bob@example.com',
-      });
-      expect(identity).not.toHaveProperty('instagram_handle');
-    });
-
-    it('returns null when no reveal record exists', async () => {
-      mocks.supabaseFrom.mockImplementation((table: string) => {
-        if (table === 'reveals') {
-          return {
-            select: () => ({
-              eq: () => ({
-                eq: () => ({
-                  maybeSingle: () => Promise.resolve({ data: null, error: null }),
-                }),
-              }),
-            }),
-          };
-        }
-        return {};
-      });
-
-      const identity = await getRevealed('user_alice', 'user_bob');
-      expect(identity).toBeNull();
-    });
-  });
+  // What a dancer may see of another's identity is tested in tests/reveal.test.ts.
 
   describe('completeOnboarding Input Sanitization', () => {
     it('sanitizes instagram handle by removing leading @ and trimming whitespace', async () => {

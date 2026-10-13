@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from 'react';
 import { isRecord } from '@/lib/utils';
+import type { PaymentType } from '@/lib/types';
 
 type RazorpayResponse = { razorpay_payment_id: string; razorpay_order_id: string; razorpay_signature: string };
 
@@ -110,15 +111,16 @@ export async function openCheckout({ orderId, amount, currency, keyId, descripti
 }
 
 /**
- * Pays for a ₹29 chat extension. The server creates the order (fixing the
- * amount and what it unlocks) and verifies the signature; the UI only changes
- * after the server says the payment is good.
+ * Pays ₹29 for a chat extension or, once the other dancer has agreed, for
+ * seeing their name and photo. The server creates the order (fixing the amount
+ * and what it buys, and refusing a reveal nobody agreed to) and verifies the
+ * signature; the UI only changes after the server says the payment is good.
  */
 export function useRazorpay() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const pay = useCallback(async (roomId: string, prefill?: { name?: string; email?: string }): Promise<boolean> => {
+  const pay = useCallback(async (roomId: string, type: PaymentType = 'extend', prefill?: { name?: string; email?: string }): Promise<boolean> => {
     setBusy(true);
     setError(null);
     const fail = (message: string) => {
@@ -132,7 +134,7 @@ export function useRazorpay() {
       const res = await fetch('/api/payment/create-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'extend', roomId }),
+        body: JSON.stringify({ type, roomId }),
       });
       order = await readJson(res);
       if (!res.ok) return fail(typeof order.error === 'string' ? order.error : 'Could not start payment.');
@@ -145,7 +147,7 @@ export function useRazorpay() {
       return fail('Could not start payment.');
     }
 
-    const result = await openCheckout({ orderId, amount, currency, keyId, description: 'Extend Chat', prefill });
+    const result = await openCheckout({ orderId, amount, currency, keyId, description: type === 'reveal' ? 'See name and photo' : 'Extend Chat', prefill });
     if (!result.verified) return fail(result.error);
     setBusy(false);
     return true;

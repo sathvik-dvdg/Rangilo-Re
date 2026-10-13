@@ -42,8 +42,11 @@ const PAYMENT = 'pay_test_1';
 // live in `ledger`, `webhook_events` rows in `events`, and every write to any
 // table is recorded in `writes`. `grantError`, when set, is what the
 // `chat_extensions` upsert fails with.
+// `reveal_requests` rows live in `requests` and `users` rows in `people` (PAY-017).
 let ledger: Row[] = [];
 let events: Row[] = [];
+let requests: Row[] = [];
+let people: Row[] = [];
 let writes: { table: string; op: 'insert' | 'upsert' | 'update'; row: Row }[] = [];
 let grantError: Row | null = null;
 let eventCount = 0;
@@ -53,12 +56,14 @@ function fakeSupabase() {
     from(table: string) {
       const filters: ((row: Row) => boolean)[] = [];
       let update: Row | null = null;
-      const rows = table === 'payment_orders' ? ledger : table === 'webhook_events' ? events : [];
+      const rows =
+        table === 'payment_orders' ? ledger : table === 'webhook_events' ? events : table === 'reveal_requests' ? requests : table === 'users' ? people : [];
       const matching = () => rows.filter((row) => filters.every((f) => f(row)));
       const query = {
         select: () => query,
         eq: (column: string, value: unknown) => (filters.push((row) => row[column] === value), query),
         neq: (column: string, value: unknown) => (filters.push((row) => row[column] !== value), query),
+        in: (column: string, values: unknown[]) => (filters.push((row) => values.includes(row[column])), query),
         maybeSingle: async () => ({ data: matching()[0] ?? null, error: null }),
         insert: async (row: Row) => {
           writes.push({ table, op: 'insert', row });
@@ -72,16 +77,17 @@ function fakeSupabase() {
           return { error: null };
         },
         update: (values: Row) => ((update = values), query),
-        // Awaiting the builder runs the update, as the Supabase client does.
-        then: (resolve: (result: { error: null }) => unknown) => {
+        // Awaiting the builder runs the update, as the Supabase client does. `data` is the rows it matched.
+        then: (resolve: (result: { data: Row[]; error: null }) => unknown) => {
           const values = update;
+          const matched = matching();
           if (values) {
-            for (const row of matching()) {
+            for (const row of matched) {
               Object.assign(row, values);
               writes.push({ table, op: 'update', row: values });
             }
           }
-          return Promise.resolve({ error: null }).then(resolve);
+          return Promise.resolve({ data: matched, error: null }).then(resolve);
         },
       };
       return query;
@@ -133,6 +139,8 @@ let errorLog: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
   ledger = [];
   events = [];
+  requests = [];
+  people = [];
   writes = [];
   grantError = null;
   eventCount = 0;
@@ -262,11 +270,17 @@ describe('Paid Mode ready (fake test keys, Razorpay SDK and database mocked)', (
       expect(body).not.toContain(CREDENTIALS.RAZORPAY_WEBHOOK_SECRET);
     });
 
-    it('refuses the withdrawn identity reveal product (DEC-002)', async () => {
+    it('refuses a reveal order that names a person instead of a room', async () => {
       const res = await createOrder(post('/api/payment/create-order', { type: 'reveal', targetUserId: 'user_bob' }));
       expect(res.status).toBe(400);
       expect(mocks.ordersCreate).not.toHaveBeenCalled();
       expect(writes).toEqual([]);
+    });
+
+    it('refuses an unknown product', async () => {
+      const res = await createOrder(post('/api/payment/create-order', { type: 'identity', roomId: ROOM }));
+      expect(res.status).toBe(400);
+      expect(mocks.ordersCreate).not.toHaveBeenCalled();
     });
 
     it("refuses a room the caller is not part of", async () => {
@@ -551,5 +565,160 @@ describe('Paid Mode ready (fake test keys, Razorpay SDK and database mocked)', (
       await webhook(signedWebhook(capturedEvent));
       expect(mocks.paymentsFetch).not.toHaveBeenCalled();
     });
+  });
+});
+
+// PAY-017, ID-001, ID-002, PAY-011. Alice pays to see Bob's real name and photo. Only Bob's
+// own "allow" (a `reveal_requests` row with status 'allowed') makes that possible; no order,
+// signature or webhook can stand in for it.
+describe('Paid Mode: paying to see a name and photo', () => {
+  const REVEAL_ORDER = { user_id: 'user_alice', room_id: ROOM, order_id: ORDER, status: 'created', amount: 2900, currency: 'INR', product: 'reveal' };
+  const reveal = () => post('/api/payment/create-order', { type: 'reveal', roomId: ROOM });
+  const ask = (status: string, overrides: Row = {}) =>
+    requests.push({ requester_id: 'user_alice', target_id: 'user_bob', status, payment_id: null, ...overrides });
+
+  beforeEach(() => {
+    setEnv({ ...CREDENTIALS, BILLING_MODE: 'paid' });
+    mocks.supabaseAdmin.mockImplementation(fakeSupabase);
+    people.push({ clerk_id: 'user_bob', real_name: 'Bob Sharma' }, { clerk_id: 'user_alice', real_name: 'Alice Patel' });
+  });
+
+  describe('create-order', () => {
+    it.each(['pending', 'declined', 'revealed'])('is refused while the request is %s, before any Razorpay order exists', async (status) => {
+      ask(status);
+      const res = await createOrder(reveal());
+      expect(res.status).toBe(409);
+      expect(mocks.ordersCreate).not.toHaveBeenCalled();
+      expect(writes).toEqual([]);
+    });
+
+    it('is refused when nobody was ever asked: an order cannot create consent', async () => {
+      const res = await createOrder(reveal());
+      expect(res.status).toBe(409);
+      expect(mocks.ordersCreate).not.toHaveBeenCalled();
+      expect(requests).toEqual([]);
+      expect(writes).toEqual([]);
+    });
+
+    it("is refused when only the opposite direction was allowed (Bob may see Alice, not Alice Bob)", async () => {
+      requests.push({ requester_id: 'user_bob', target_id: 'user_alice', status: 'allowed', payment_id: null });
+      expect((await createOrder(reveal())).status).toBe(409);
+      expect(mocks.ordersCreate).not.toHaveBeenCalled();
+    });
+
+    it('is refused when the other dancer has no name to share', async () => {
+      ask('allowed');
+      people[0].real_name = '   ';
+      expect((await createOrder(reveal())).status).toBe(409);
+      expect(mocks.ordersCreate).not.toHaveBeenCalled();
+    });
+
+    it('once the other dancer has allowed it, creates the order at the fixed price and records it as a reveal', async () => {
+      ask('allowed');
+      const res = await createOrder(post('/api/payment/create-order', { type: 'reveal', roomId: ROOM, amount: 1 }));
+      expect(res.status).toBe(200);
+      expect(mocks.ordersCreate).toHaveBeenCalledWith(expect.objectContaining({ amount: 2900, currency: 'INR' }));
+      expect(writesTo('payment_orders')).toEqual([{ table: 'payment_orders', op: 'insert', row: REVEAL_ORDER }]);
+      // Ordering alone reveals nothing.
+      expect(requests[0]).toMatchObject({ status: 'allowed', payment_id: null });
+    });
+  });
+
+  describe('fulfilment', () => {
+    beforeEach(() => seedOrder({ product: 'reveal' }));
+
+    it('a verified checkout reveals: the request becomes revealed with the payment id and the order is paid', async () => {
+      ask('allowed');
+      const res = await verify(post('/api/payment/verify', checkoutResponse()));
+      expect(res.status).toBe(200);
+      // The response still carries no identity; the chat reads it from the room state afterwards.
+      expect(await res.json()).toEqual({ verified: true });
+      expect(requests[0]).toMatchObject({ status: 'revealed', payment_id: PAYMENT });
+      expect(ledger[0]).toMatchObject({ status: 'paid', payment_id: PAYMENT });
+      expect(writesTo('chat_extensions')).toEqual([]); // a reveal adds no chat time
+    });
+
+    it('the webhook alone reveals too, and verify plus webhook reveal once', async () => {
+      ask('allowed');
+      expect((await webhook(signedWebhook(capturedEvent))).status).toBe(200);
+      expect(requests[0]).toMatchObject({ status: 'revealed', payment_id: PAYMENT });
+      const again = await verify(post('/api/payment/verify', checkoutResponse()));
+      expect(again.status).toBe(200);
+      expect(writesTo('reveal_requests')).toHaveLength(1);
+      expect(ledger[0]).toMatchObject({ status: 'paid' });
+    });
+
+    it.each([
+      ['there is no request at all', null],
+      ['the request is still pending', 'pending'],
+      ['the other dancer declined, or withdrew their yes before the payment arrived', 'declined'],
+    ])('a captured payment reveals nothing when %s; the order is kept for refund', async (_name, status) => {
+      if (status) ask(status);
+      const res = await verify(post('/api/payment/verify', checkoutResponse()));
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ verified: false, reason: 'fulfilment_failed' });
+      expect(writesTo('reveal_requests')).toEqual([]);
+      expect(requests.map((r) => r.status)).toEqual(status ? [status] : []);
+      expect(ledger[0]).toMatchObject({ status: 'fulfilment_failed', payment_id: PAYMENT });
+    });
+
+    it('the same holds for the webhook: no consent, nothing revealed, acknowledged and recorded', async () => {
+      ask('declined');
+      const res = await webhook(signedWebhook(capturedEvent));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, result: 'fulfilment_failed' });
+      expect(requests[0]).toMatchObject({ status: 'declined', payment_id: null });
+    });
+
+    it('a second payment for a pair already revealed changes nothing and is kept for refund', async () => {
+      ask('revealed', { payment_id: 'pay_earlier' });
+      const res = await verify(post('/api/payment/verify', checkoutResponse()));
+      expect(res.status).toBe(409);
+      expect(requests[0]).toMatchObject({ status: 'revealed', payment_id: 'pay_earlier' });
+      expect(ledger[0]).toMatchObject({ status: 'fulfilment_failed' });
+    });
+
+    it('a redelivery after the reveal was granted but before the order was marked paid settles it without a second grant', async () => {
+      ask('revealed', { payment_id: PAYMENT });
+      const res = await webhook(signedWebhook(capturedEvent));
+      expect(await res.json()).toEqual({ ok: true, result: 'fulfilled' });
+      expect(writesTo('reveal_requests')).toEqual([]);
+      expect(ledger[0]).toMatchObject({ status: 'paid', payment_id: PAYMENT });
+    });
+
+    it.each([
+      ['a forged signature', { ...checkoutResponse(), razorpay_signature: 'f'.repeat(64) }, 400],
+      ['a payment Razorpay has not captured', checkoutResponse(), 400],
+    ])('%s reveals nothing', async (name, body, status) => {
+      ask('allowed');
+      if (name.includes('captured')) mocks.paymentsFetch.mockResolvedValue({ ...capturedPayment, status: 'authorized' });
+      expect((await verify(post('/api/payment/verify', body))).status).toBe(status);
+      expect(requests[0]).toMatchObject({ status: 'allowed', payment_id: null });
+    });
+
+    it("another user cannot settle Alice's reveal order", async () => {
+      ask('allowed');
+      mocks.userId = 'user_mallory';
+      expect((await verify(post('/api/payment/verify', checkoutResponse()))).status).toBe(403);
+      expect(requests[0]).toMatchObject({ status: 'allowed', payment_id: null });
+    });
+
+    it('with billing off, a correctly signed reveal payment reveals nothing', async () => {
+      ask('allowed');
+      setEnv({ BILLING_MODE: '' });
+      expect((await verify(post('/api/payment/verify', checkoutResponse()))).status).toBe(403);
+      expect((await webhook(signedWebhook(capturedEvent))).status).toBe(200);
+      expect(requests[0]).toMatchObject({ status: 'allowed', payment_id: null });
+      expect(ledger[0]).toMatchObject({ status: 'created' });
+    });
+  });
+
+  it('paying for an extension never reveals anyone, even where a reveal has been allowed', async () => {
+    ask('allowed');
+    seedOrder(); // an ordinary extension order
+    expect((await verify(post('/api/payment/verify', checkoutResponse()))).status).toBe(200);
+    expect(writesTo('chat_extensions')).toHaveLength(1);
+    expect(writesTo('reveal_requests')).toEqual([]);
+    expect(requests[0]).toMatchObject({ status: 'allowed', payment_id: null });
   });
 });

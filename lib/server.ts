@@ -2,8 +2,9 @@ import 'server-only';
 import { auth } from '@clerk/nextjs/server';
 import { supabaseAdmin } from './supabaseAdmin';
 import { diagnoseDbError } from './dbDiagnosis';
-import { FREE_CHAT_MS, partnerFromRoomId } from './room';
-import type { MyProfile, PublicProfile, RevealedIdentity, RoomState } from './types';
+import { FREE_CHAT_MS, effectiveExtraSeconds, partnerFromRoomId } from './room';
+import { getRevealState, getRevealed } from './reveal';
+import type { MyProfile, PublicProfile, RoomState } from './types';
 
 export const PUBLIC_COLUMNS = 'clerk_id, display_name, gender, last_seen';
 export const OWN_COLUMNS = 'clerk_id, display_name, gender, last_seen, real_name, email';
@@ -126,10 +127,11 @@ export async function loadRoom(roomId: string, userId: string) {
   return { db, me, partner, partnerId, room: room as { id: string; timer_started_at: string | null } };
 }
 
-export async function extraSecondsFor(roomId: string) {
-  const { data, error } = await supabaseAdmin().from('chat_extensions').select('extra_seconds').eq('room_id', roomId);
+/** Seconds the room's extensions add beyond the free time, measured from the clock's start (see effectiveExtraSeconds). */
+export async function extraSecondsFor(roomId: string, timerStartedAt: string | null) {
+  const { data, error } = await supabaseAdmin().from('chat_extensions').select('extra_seconds, paid_at').eq('room_id', roomId);
   if (error) throw error;
-  return (data ?? []).reduce((sum, r) => sum + (r.extra_seconds as number), 0);
+  return effectiveExtraSeconds(timerStartedAt, (data ?? []) as { extra_seconds: number; paid_at: string }[]);
 }
 
 export function isExpired(timerStartedAt: string | null, extraSeconds: number) {
@@ -137,38 +139,18 @@ export function isExpired(timerStartedAt: string | null, extraSeconds: number) {
   return Date.now() - new Date(timerStartedAt).getTime() >= FREE_CHAT_MS + extraSeconds * 1000;
 }
 
-export async function getRevealed(payerId: string, targetId: string): Promise<RevealedIdentity | null> {
-  const db = supabaseAdmin();
-  const { data: reveal, error } = await db
-    .from('reveals')
-    .select('id')
-    .eq('payer_id', payerId)
-    .eq('target_id', targetId)
-    .maybeSingle();
-  if (error) throw error;
-  if (!reveal) return null;
-  // Pre-existing reveals rows only (DEC-003). Never widen this to more fields, such as
-  // instagram_handle: nobody consented to that disclosure (PRIV-001, ID-001).
-  const { data: user, error: uErr } = await db
-    .from('users')
-    .select('real_name, email')
-    .eq('clerk_id', targetId)
-    .single();
-  if (uErr) throw uErr;
-  return user as RevealedIdentity;
-}
-
 export async function getRoomState(roomId: string, userId: string): Promise<RoomState> {
   const { db, me, partner, partnerId, room } = await loadRoom(roomId, userId);
-  const [{ data: messages, error }, extraSeconds, revealed] = await Promise.all([
+  const [{ data: messages, error }, extraSeconds, revealed, reveal] = await Promise.all([
     db
       .from('messages')
       .select('id, room_id, sender_id, text, created_at, read_by')
       .eq('room_id', roomId)
       .order('created_at', { ascending: true })
       .limit(500),
-    extraSecondsFor(roomId),
+    extraSecondsFor(roomId, room.timer_started_at),
     getRevealed(userId, partnerId),
+    getRevealState(userId, partnerId),
   ]);
   if (error) throw error;
   return {
@@ -179,5 +161,6 @@ export async function getRoomState(roomId: string, userId: string): Promise<Room
     timerStartedAt: room.timer_started_at,
     extraSeconds,
     revealed,
+    reveal,
   };
 }

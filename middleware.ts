@@ -3,7 +3,8 @@ import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { getClerkConfigProblems } from '@/lib/clerkConfig';
 
 // Clerk v5 replaces the deprecated authMiddleware with clerkMiddleware.
-const isProtected = createRouteMatcher(['/dashboard(.*)', '/chat(.*)']);
+// /admin needs a session here; whether that session is an admin is decided by requireAdmin() on the server.
+const isProtected = createRouteMatcher(['/dashboard(.*)', '/chat(.*)', '/admin(.*)']);
 
 const withClerk = clerkMiddleware((auth, req) => {
   if (isProtected(req)) auth().protect();
