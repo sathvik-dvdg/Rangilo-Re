@@ -706,7 +706,7 @@ Razorpay onboarding and product eligibility are **unresolved**. The ability to c
 
 #### PRIV-006 — Truthful privacy and payment claims
 - **Requirement:** In-app and marketing copy must match actual behaviour. Fabricated statistics and testimonials must not be presented as real.
-- **Files:** `OnboardingModal.tsx:90` ("Your real name stays private") vs paid reveal; `HeroSection.tsx:66` ("until someone pays to ask for it" — there is no asking; payment discloses immediately); `Testimonials.tsx:7-14` (invented users, including a privacy claim the app does not honour); `StatsCounter.tsx:7-11` ("5000+ Dancers", "200+ Events"); `README.md` describes the paid reveal as intended behaviour.
+- **Files:** `OnboardingModal.tsx:90` ("Your real name stays private") vs paid reveal; `HeroSection.tsx:66` ("until someone pays to ask for it" — there is no asking; payment discloses immediately); `Testimonials.tsx:7-14` (invented users, including a privacy claim the app does not honour); `StatsCounter.tsx:7-11` ("5000+ Dancers", "200+ Events"); `README.md` described the paid reveal as intended behaviour until it was rewritten on 2026-10-13 (it now states the Free Mode default and lists the reveal code as pending removal); the in-app and landing copy are unchanged.
 - **Status:** Conflicts.
 - **Depends on:** DEC-002, DEC-008.
 - **Acceptance:** Copy review sign-off; every factual claim has a source or is removed.
@@ -981,7 +981,6 @@ Known limitations of the Free Mode gate, tracked here so they are not mistaken f
 - Ad-hoc request-body casts instead of validation (SEC-004).
 - `read_by[]` read-modify-write (CHAT-006).
 - `PRICE_PAISE` lives in `lib/room.ts` (a client-importable module) — fine for display, but the authoritative catalogue must be server-side (PAY-002).
-- README "Privacy and payment safety" section describes the reveal flow as safe; it must be updated alongside R-1's fix.
 
 ---
 
