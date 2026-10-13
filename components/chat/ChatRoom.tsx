@@ -177,12 +177,27 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
           <Link href="/dashboard" aria-label="Back to dancers" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-paper/70 hover:bg-paper/5 hover:text-paper">
             <ChevronLeft className="h-6 w-6" />
           </Link>
-          <Avatar name={partner.display_name} size={40} online={partnerHere} />
+          <Avatar name={partner.display_name} gender={partner.gender} size={40} online={partnerHere} />
           <div className="min-w-0 flex-1">
-            <p className="truncate font-display text-[15px] text-paper">{partner.display_name}</p>
+            <div className="flex items-center gap-2">
+              <p className="truncate font-display text-[15px] text-paper">
+                {revealed?.real_name ? revealed.real_name : partner.display_name}
+              </p>
+              {revealed && (
+                <span className="rounded bg-haldi/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-haldi">
+                  Unlocked
+                </span>
+              )}
+            </div>
             <div className="mt-0.5 flex items-center gap-2">
               <GenderBadge gender={partner.gender} />
-              <span className="text-xs text-paper/60">{partnerHere ? 'in the room' : 'away'}</span>
+              {revealed ? (
+                <span className="truncate text-xs text-paper/70">
+                  {partner.display_name} {revealed.email && `· ${revealed.email}`}
+                </span>
+              ) : (
+                <span className="text-xs text-paper/60">{partnerHere ? 'in the room' : 'away'}</span>
+              )}
             </div>
           </div>
           {billingEnabled && !revealed && (

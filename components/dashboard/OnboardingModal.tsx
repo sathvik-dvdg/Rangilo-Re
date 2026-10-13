@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useTransition } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useUser } from '@clerk/nextjs';
 import { Lock, RefreshCw, Sparkles, Upload, X } from 'lucide-react';
+import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/button';
 import { completeOnboarding, rerollDisplayName } from '@/app/(main)/dashboard/actions';
 import { useFocusTrap } from '@/hooks/useFocusTrap';
@@ -159,9 +160,25 @@ export function OnboardingModal({
                       Who&apos;s dancing?
                     </h2>
                     <p className="mt-1 text-sm text-paper/60">
-                      Shown as a small badge next to your nickname.
+                      Choose your avatar style. Male and female have distinct festive garba avatars!
                     </p>
-                    <div role="group" aria-label="Gender" className="relative mt-6 grid grid-cols-3 rounded-full border border-paper/15 p-1 bg-ink">
+
+                    <div className="mt-5 flex justify-center">
+                      <div className="flex flex-col items-center">
+                        <Avatar name={name || 'Dancer'} gender={gender || 'female'} size={68} />
+                        <span className="mt-2 text-xs font-semibold uppercase tracking-wider text-haldi">
+                          {gender === 'female'
+                            ? 'Female Garba Avatar'
+                            : gender === 'male'
+                              ? 'Male Garba Avatar'
+                              : gender === 'other'
+                                ? 'Festive Dandiya Avatar'
+                                : 'Select Gender'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div role="group" aria-label="Gender" className="relative mt-5 grid grid-cols-3 rounded-full border border-paper/15 p-1 bg-ink">
                       {GENDERS.map((g) => (
                         <button
                           key={g.id}
@@ -181,7 +198,7 @@ export function OnboardingModal({
                         </button>
                       ))}
                     </div>
-                    <Button className="mt-8 w-full" disabled={!gender} onClick={() => setStep(1)}>
+                    <Button className="mt-7 w-full" disabled={!gender} onClick={() => setStep(1)}>
                       Continue
                     </Button>
                   </>
@@ -204,29 +221,32 @@ export function OnboardingModal({
                         </label>
                         <span className="text-[11px] text-paper/40">Visible to all dancers</span>
                       </div>
-                      <div className="mt-1.5 flex items-center justify-between gap-2 rounded-lg border border-haldi/50 bg-haldi/10 px-3.5 py-2 focus-within:border-haldi focus-within:ring-1 focus-within:ring-haldi transition-all">
-                        <input
-                          type="text"
-                          value={name}
-                          onChange={(e) => {
-                            setName(e.target.value);
-                            setError(null);
-                          }}
-                          placeholder="Type your garba nickname..."
-                          maxLength={32}
-                          className="w-full bg-transparent font-display text-lg text-haldi placeholder:text-haldi/40 focus:outline-none"
-                        />
-                        <button
-                          type="button"
-                          onClick={reroll}
-                          disabled={pending}
-                          title="Generate a random garba nickname"
-                          aria-label="Generate another name"
-                          className="shrink-0 flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold text-haldi hover:bg-haldi/20 transition-colors"
-                        >
-                          <RefreshCw className={cn('h-3.5 w-3.5', pending && 'animate-spin')} />
-                          <span className="hidden sm:inline">Reroll</span>
-                        </button>
+                      <div className="mt-1.5 flex items-center gap-3">
+                        <Avatar name={name || 'Dancer'} gender={gender || undefined} size={44} />
+                        <div className="flex flex-1 items-center justify-between gap-2 rounded-lg border border-haldi/50 bg-haldi/10 px-3.5 py-2 focus-within:border-haldi focus-within:ring-1 focus-within:ring-haldi transition-all">
+                          <input
+                            type="text"
+                            value={name}
+                            onChange={(e) => {
+                              setName(e.target.value);
+                              setError(null);
+                            }}
+                            placeholder="Type your garba nickname..."
+                            maxLength={32}
+                            className="w-full bg-transparent font-display text-lg text-haldi placeholder:text-haldi/40 focus:outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={reroll}
+                            disabled={pending}
+                            title="Generate a random garba nickname"
+                            aria-label="Generate another name"
+                            className="shrink-0 flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold text-haldi hover:bg-haldi/20 transition-colors"
+                          >
+                            <RefreshCw className={cn('h-3.5 w-3.5', pending && 'animate-spin')} />
+                            <span className="hidden sm:inline">Reroll</span>
+                          </button>
+                        </div>
                       </div>
                       <p className="mt-1 text-[11px] text-paper/50">
                         Type any name of your choice, or tap Reroll for an authentic festive nickname.
@@ -286,7 +306,7 @@ export function OnboardingModal({
                       {isEditing ? (
                         <>
                           <Button
-                            variant="secondary"
+                            variant="outline"
                             onClick={() => {
                               if (!name.trim()) {
                                 setError('Please enter a garba nickname.');

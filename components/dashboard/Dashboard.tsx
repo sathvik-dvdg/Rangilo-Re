@@ -26,11 +26,17 @@ const FILTERS: { id: Filter; label: string }[] = [
 
 const ROW = 84;
 
-type RowData = { items: PublicProfile[]; onlineIds: Set<string>; open: (u: PublicProfile) => void };
+type RowData = {
+  items: PublicProfile[];
+  onlineIds: Set<string>;
+  revealed: Record<string, { real_name: string; email: string }>;
+  open: (u: PublicProfile) => void;
+};
 
 function Row({ index, style, data }: ListChildComponentProps<RowData>) {
   const u = data.items[index];
   const online = data.onlineIds.has(u.clerk_id);
+  const unlocked = data.revealed[u.clerk_id];
   return (
     <div style={style} className="px-1">
       <motion.button
@@ -40,14 +46,27 @@ function Row({ index, style, data }: ListChildComponentProps<RowData>) {
         onClick={() => data.open(u)}
         className="flex h-[76px] w-full items-center gap-4 rounded-md px-3 text-left transition-colors hover:bg-paper/[0.04]"
       >
-        <Avatar name={u.display_name} online={online} />
+        <Avatar name={u.display_name} gender={u.gender} online={online} />
         <div className="min-w-0 flex-1 border-b border-paper/[0.07] pb-3 pt-3">
           <div className="flex items-center gap-2">
-            <p className="truncate font-display text-[15px] text-paper">{u.display_name}</p>
+            <p className="truncate font-display text-[15px] text-paper">
+              {unlocked?.real_name ? unlocked.real_name : u.display_name}
+            </p>
+            {unlocked && (
+              <span className="rounded bg-haldi/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-haldi">
+                Unlocked
+              </span>
+            )}
             <GenderBadge gender={u.gender} />
           </div>
-          <p className={cn('mt-1 text-xs', online ? 'text-[#9CC587]' : 'text-paper/45')}>
-            {online ? 'On the floor now' : `Last seen ${timeAgo(u.last_seen)}`}
+          <p className={cn('mt-1 text-xs truncate', online ? 'text-[#9CC587]' : 'text-paper/45')}>
+            {unlocked?.email ? (
+              <span className="text-paper/70">{unlocked.email} · {online ? 'Online now' : `Seen ${timeAgo(u.last_seen)}`}</span>
+            ) : online ? (
+              'On the floor now'
+            ) : (
+              `Last seen ${timeAgo(u.last_seen)}`
+            )}
           </p>
         </div>
       </motion.button>
@@ -59,6 +78,7 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
   const { userId } = useAuth();
   const router = useRouter();
   const onlineIds = useAppStore((s) => s.onlineIds);
+  const revealed = useAppStore((s) => s.revealed);
   const [users, setUsers] = useState<PublicProfile[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -108,9 +128,10 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
     () => ({
       items: visible,
       onlineIds,
+      revealed,
       open: (u) => userId && router.push(`/chat/${encodeURIComponent(roomIdFor(userId, u.clerk_id))}`),
     }),
-    [visible, onlineIds, userId, router],
+    [visible, onlineIds, revealed, userId, router],
   );
 
   return (
@@ -119,7 +140,7 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
         <>
           <div className="stitch-b bg-ink-2">
             <div className="mx-auto flex max-w-3xl items-center gap-4 px-4 py-4 sm:px-6">
-              <Avatar name={me.display_name} size={44} />
+              <Avatar name={me.display_name} gender={me.gender} size={44} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <p className="truncate font-display text-lg text-haldi">{me.display_name}</p>
