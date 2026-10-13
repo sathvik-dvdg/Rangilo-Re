@@ -104,8 +104,7 @@ export async function settlePayment(order: PaymentOrder, paymentId: string): Pro
     }
     return 'already_processed';
   }
-  const partnerId = partnerFromRoomId(order.room_id, order.user_id);
-  if (!partnerId) throw new FulfilmentError('bad_room');
+  if (!partnerFromRoomId(order.room_id, order.user_id)) throw new FulfilmentError('bad_room');
 
   const db = supabaseAdmin();
   const grant = await db.from('chat_extensions').upsert(
@@ -120,21 +119,6 @@ export async function settlePayment(order: PaymentOrder, paymentId: string): Pro
   if (grant.error) {
     if (grant.error.code === FOREIGN_KEY_VIOLATION) throw new FulfilmentError('room_not_found');
     throw grant.error;
-  }
-
-  // Grant partner identity and real name reveal to buyer (unlimited chat & profile reveal)
-  try {
-    await db.from('reveals').upsert(
-      {
-        payer_id: order.user_id,
-        target_id: partnerId,
-        payment_id: paymentId,
-        paid_at: new Date().toISOString(),
-      },
-      { onConflict: 'payer_id,target_id', ignoreDuplicates: true },
-    );
-  } catch (err) {
-    console.error('[billing] could not insert reveals row', err);
   }
 
   const paid = await db.from('payment_orders').update({ status: 'paid', payment_id: paymentId }).eq('order_id', order.order_id).neq('status', 'paid');

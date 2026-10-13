@@ -1,30 +1,76 @@
 'use client';
 
-import { useLayoutEffect, useRef } from 'react';
-import { motion } from 'framer-motion';
+import { useEffect, useLayoutEffect, useRef } from 'react';
+import { motion, useReducedMotion } from 'framer-motion';
 import { gsap } from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 
+// One garba clip cut into three equal parts (public/videos), one part per card.
+// The scrim keeps each card's colour and the text readable over the footage.
 const cards = [
   {
     n: '01',
     title: 'Join the Night',
     body: 'Sign up and we hand you a garba nickname — DiyaDancer_Avni_4821, say. That is all anyone sees.',
     tone: 'bg-kumkum text-paper',
+    scrim: 'from-kumkum via-kumkum/75 to-kumkum/40',
+    clip: '/videos/garba-night-1',
   },
   {
     n: '02',
     title: 'Find a Partner',
     body: 'Browse who is dancing tonight. Filter by gender or by who is online right now.',
     tone: 'bg-haldi text-ink',
+    scrim: 'from-haldi via-haldi/80 to-haldi/45',
+    clip: '/videos/garba-night-2',
   },
   {
     n: '03',
     title: 'Connect Privately',
     body: 'Open a room for exactly two. Once you both say hi, a two-minute clock starts. Make it count.',
     tone: 'bg-neel text-paper',
+    scrim: 'from-neel via-neel/75 to-neel/40',
+    clip: '/videos/garba-night-3',
   },
 ];
+
+function CardVideo({ clip }: { clip: string }) {
+  const video = useRef<HTMLVideoElement>(null);
+  const reduceMotion = useReducedMotion();
+
+  // Play only while the card is on screen. With reduced motion the poster frame stays.
+  useEffect(() => {
+    const el = video.current;
+    if (!el) return;
+    if (reduceMotion) {
+      el.pause();
+      return;
+    }
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) el.play().catch(() => {});
+        else el.pause();
+      },
+      { threshold: 0.2 },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [reduceMotion]);
+
+  return (
+    <video
+      ref={video}
+      src={`${clip}.mp4`}
+      poster={`${clip}.jpg`}
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      tabIndex={-1}
+      className="h-full w-full object-cover"
+    />
+  );
+}
 
 export function HowItWorks() {
   const section = useRef<HTMLElement>(null);
@@ -75,6 +121,10 @@ export function HowItWorks() {
               className={`grain flex h-[360px] w-full flex-col justify-between rounded-lg p-8 md:h-[62vh] md:w-[30vw] md:max-w-[420px] ${c.tone}`}
               style={{ transformStyle: 'preserve-3d' }}
             >
+              <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 overflow-hidden rounded-lg">
+                <CardVideo clip={c.clip} />
+                <div className={`absolute inset-0 bg-gradient-to-t ${c.scrim}`} />
+              </div>
               <span className="font-display text-7xl font-semibold opacity-30">{c.n}</span>
               <div style={{ transform: 'translateZ(30px)' }}>
                 <h3 className="font-display text-3xl font-semibold">{c.title}</h3>

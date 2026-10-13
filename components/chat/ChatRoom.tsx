@@ -9,6 +9,7 @@ import { GenderBadge } from '@/components/ui/GenderBadge';
 import { ChatTimer } from './ChatTimer';
 import { MessageBubble } from './MessageBubble';
 import { RevealCard } from './RevealCard';
+import { RoomSidebar } from './RoomSidebar';
 import { TimerExpiredOverlay } from './TimerExpiredOverlay';
 import { ExtendModal } from '@/components/modals/ExtendModal';
 import { Toast } from '@/components/ui/Toast';
@@ -21,6 +22,9 @@ import { cn } from '@/lib/utils';
 import { fireCelebration } from '@/lib/confetti';
 import type { Message, RoomState } from '@/lib/types';
 
+// Openers offered in an empty room; tapping one fills the composer without sending.
+const ICEBREAKERS = ['Hi! 👋', 'Where are you on the floor?', 'What are you wearing tonight?'];
+
 export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: RoomState; billingEnabled: boolean; renderedAt?: number }) {
   const { roomId, me, partner } = initial;
   const [messages, setMessages] = useState<Message[]>(initial.messages);
@@ -29,20 +33,18 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
   const storedReveal = useAppStore((s) => s.revealed[partner.clerk_id]);
   const setRevealedInStore = useAppStore((s) => s.setRevealed);
   const revealed = storedReveal ?? initial.revealed;
-  const isUnlocked = Boolean(revealed);
 
   const [text, setText] = useState('');
   const [sheet, setSheet] = useState<'extend' | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
+  const composer = useRef<HTMLInputElement>(null);
   const { pay, busy, error: payError, clearError } = useRazorpay();
 
   const timer = useChatTimer(timerStartedAt, extraSeconds, renderedAt);
-  // If the profile is unlocked for ₹29, chat has no time limit!
-  const isExpired = isUnlocked ? false : timer.expired;
   // Free Mode has no extension, so a closed chat stays readable instead of blurring behind an overlay.
-  const closedFree = isExpired && !billingEnabled;
+  const closedFree = timer.expired && !billingEnabled;
 
   const refresh = useCallback(async () => {
     const res = await fetch(`/api/rooms/${encodeURIComponent(roomId)}`);
@@ -121,7 +123,7 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
   const send = async (e: React.FormEvent) => {
     e.preventDefault();
     const body = text.trim();
-    if (!body || isExpired) return;
+    if (!body || timer.expired) return;
     setText('');
     setSendError(null);
     const temp: Message = {
@@ -161,7 +163,7 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
     setSheet(null);
     await refresh();
     fireCelebration();
-    setToast('🎉 Unlimited chat & real identity unlocked!');
+    setToast('+2 minutes added');
   };
 
   const openSheet = () => {
@@ -177,120 +179,168 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
         : 'Starting the clock…'
     : null;
 
-  return (
-    <main className="flex h-[100dvh] flex-col bg-ink">
-      <header className="z-30 bg-ink-2">
-        <div className="flex items-center gap-3 px-2 py-3 sm:px-4">
-          <Link href="/dashboard" aria-label="Back to dancers" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-paper/70 hover:bg-paper/5 hover:text-paper">
-            <ChevronLeft className="h-6 w-6" />
-          </Link>
-          <Avatar name={partner.display_name} gender={partner.gender} size={40} online={partnerHere} />
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <p className="truncate font-display text-[15px] text-paper">
-                {revealed?.real_name ? revealed.real_name : partner.display_name}
-              </p>
-              {revealed && (
-                <span className="rounded bg-haldi/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-haldi">
-                  Unlocked
-                </span>
-              )}
-              <GenderBadge gender={partner.gender} />
-              {(partner.branch || partner.college_year) && (
-                <span className="rounded bg-paper/10 px-1.5 py-0.5 text-[10px] font-semibold text-paper/70">
-                  {partner.branch || 'CSE'} · {partner.college_year ? partner.college_year.replace(' Year', ' Yr') : '1st Yr'}
-                </span>
-              )}
-              {partner.vibe_tag && (
-                <span className="rounded-full bg-haldi/10 border border-haldi/25 px-2 py-0.5 text-[10px] font-medium text-haldi truncate max-w-[150px]">
-                  {partner.vibe_tag}
-                </span>
-              )}
-            </div>
-            <div className="mt-0.5 flex items-center gap-2 text-xs truncate">
-              {partner.outfit_color ? (
-                <span className="truncate text-paper/75">
-                  👘 <span className="italic">{partner.outfit_color}</span>
-                </span>
-              ) : revealed ? (
-                <span className="truncate text-paper/70">
-                  {partner.display_name} {revealed.email && `· ${revealed.email}`}
-                </span>
-              ) : (
-                <span className="text-paper/60">{partnerHere ? 'in the room' : 'away'}</span>
-              )}
-              {partner.outfit_color && (
-                <span className="shrink-0 text-paper/40">· {partnerHere ? 'here' : 'away'}</span>
-              )}
-            </div>
-          </div>
-        </div>
-        <RevealCard identity={revealed} />
-        <ChatTimer started={timer.started} remaining={timer.remaining} fraction={timer.fraction} waitingFor={waitingFor} isUnlocked={isUnlocked} />
-      </header>
+  const firstName = partner.display_name.split('_')[0];
+  const campus = [partner.branch, partner.college_year?.replace(' Year', ' Yr')].filter(Boolean).join(' · ');
 
-      <div className="relative flex-1 overflow-hidden">
-        <div className={cn('bandhani h-full overflow-y-auto px-4 py-5 transition-[filter] duration-500', isExpired && billingEnabled && 'pointer-events-none blur-[3px]')}>
-          <div className="mx-auto flex max-w-2xl flex-col gap-2">
-            {messages.length === 0 && (
-              <div className="mx-auto my-10 max-w-xs rounded-lg stitch bg-ink-2 p-5 text-center">
-                <p className="font-display text-lg text-haldi">Say hi 👋</p>
-                <p className="mt-1 text-sm text-paper/60">The 2-minute clock starts once you&apos;ve both sent a message.</p>
-              </div>
-            )}
-            {messages.map((m) => (
-              <MessageBubble key={m.id} message={m} mine={m.sender_id === me.clerk_id} partnerId={partner.clerk_id} />
-            ))}
-            <div ref={bottom} />
-          </div>
-        </div>
-        {billingEnabled && <TimerExpiredOverlay show={isExpired && sheet === null} partnerName={partner.display_name} onExtend={openSheet} />}
+  const fillComposer = (line: string) => {
+    setText(line);
+    composer.current?.focus();
+  };
+
+  return (
+    // Phone: the chat fills the screen. Laptop: a centred chat panel beside a partner and room panel.
+    <main className="relative flex h-[100dvh] flex-col overflow-hidden bg-ink lg:flex-row lg:justify-center lg:gap-6 lg:p-6">
+      <div aria-hidden className="pointer-events-none absolute inset-0 hidden lg:block">
+        <div className="absolute -left-32 -top-40 h-[28rem] w-[28rem] rounded-full bg-kumkum/[0.12] blur-3xl" />
+        <div className="absolute -bottom-48 -right-24 h-[30rem] w-[30rem] rounded-full bg-haldi/[0.08] blur-3xl" />
       </div>
 
-      {closedFree ? (
-        <div role="status" className="border-t border-paper/10 bg-ink-2 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4">
-          <div className="mx-auto flex max-w-2xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="font-display text-lg text-paper">Time&apos;s up</p>
-              <p className="text-sm text-paper/70">Your 2-minute chat has ended. Your messages are still here to read.</p>
-            </div>
-            <Link href="/dashboard" className={buttonVariants({ variant: 'haldi', className: 'w-full shrink-0 sm:w-auto' })}>
-              Back to dancers
+      <section className="relative flex min-h-0 flex-1 flex-col bg-ink lg:max-w-3xl lg:overflow-hidden lg:rounded-2xl lg:border lg:border-paper/10 lg:shadow-2xl lg:shadow-black/50">
+        <header className="z-30 border-b border-paper/[0.07] bg-ink-2">
+          <div className="flex items-center gap-2.5 px-2 py-2.5 sm:gap-3 sm:px-3">
+            <Link href="/dashboard" aria-label="Back to dancers" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-paper/70 transition-colors hover:bg-paper/5 hover:text-paper">
+              <ChevronLeft className="h-6 w-6" />
             </Link>
+            <Avatar name={partner.display_name} gender={partner.gender} size={44} online={partnerHere} />
+            <div className="min-w-0 flex-1">
+              <div className="flex min-w-0 items-center gap-2">
+                <p className="truncate font-display text-[15px] text-paper sm:text-base">{revealed?.real_name ? revealed.real_name : partner.display_name}</p>
+                {revealed && (
+                  <span className="shrink-0 rounded bg-haldi/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-haldi">Unlocked</span>
+                )}
+                <GenderBadge gender={partner.gender} className="shrink-0" />
+                {partner.vibe_tag && (
+                  <span className="hidden shrink-0 rounded-full border border-haldi/25 bg-haldi/10 px-2 py-0.5 text-[10px] font-medium text-haldi sm:inline-flex lg:hidden">
+                    {partner.vibe_tag}
+                  </span>
+                )}
+              </div>
+              {/* The side panel carries the campus and outfit details on laptop screens. */}
+              <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-paper/55">
+                <span className={cn('shrink-0 font-semibold', partnerHere && 'text-[#9CC587]')}>{partnerHere ? 'In the room' : 'Away'}</span>
+                {revealed?.real_name && <span className="truncate">· {partner.display_name}</span>}
+                {campus && <span className="shrink-0 lg:hidden">· {campus}</span>}
+                {partner.outfit_color && (
+                  <span className="truncate lg:hidden">
+                    · 👘 <span className="italic">{partner.outfit_color}</span>
+                  </span>
+                )}
+              </p>
+            </div>
           </div>
-        </div>
-      ) : (
-      <form
-        onSubmit={send}
-        className={cn('border-t border-paper/10 bg-ink-2 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 transition-[filter,opacity]', isExpired && 'opacity-50 blur-[1px]')}
-      >
-        {sendError && <p className="mx-auto mb-2 max-w-2xl px-2 text-xs text-[#E58A7F]">{sendError}</p>}
-        <div className="mx-auto flex max-w-2xl items-center gap-2">
-          <input
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            disabled={isExpired}
-            maxLength={1000}
-            aria-label="Message"
-            autoComplete="off"
-            enterKeyHint="send"
-            placeholder={isExpired ? 'Chat closed' : 'Message'}
-            className="h-12 flex-1 rounded-full border border-paper/15 bg-ink px-5 text-[15px] text-paper placeholder:text-paper/35 focus:border-haldi focus:outline-none disabled:cursor-not-allowed"
-          />
-          <motion.button
-            whileTap={{ scale: 0.9 }}
-            type="submit"
-            disabled={isExpired || !text.trim()}
-            aria-label="Send"
-            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-kumkum text-paper transition-colors hover:bg-kumkum-dark disabled:opacity-40"
-          >
-            <SendHorizontal className="h-5 w-5" />
-          </motion.button>
-        </div>
-      </form>
-      )}
+          <RevealCard identity={revealed} />
+          <ChatTimer started={timer.started} remaining={timer.remaining} total={timer.total} fraction={timer.fraction} waitingFor={waitingFor} />
+        </header>
 
-      {billingEnabled && <ExtendModal open={sheet === 'extend'} partnerName={partner.display_name} onClose={() => setSheet(null)} onPay={startPayment} busy={busy} error={payError} />}
+        <div className="relative min-h-0 flex-1 overflow-hidden">
+          <div className={cn('bandhani h-full overflow-y-auto px-3 py-5 transition-[filter] duration-500 sm:px-5', timer.expired && billingEnabled && 'pointer-events-none blur-[3px]')}>
+            <div className="mx-auto flex min-h-full max-w-2xl flex-col">
+              {messages.length === 0 ? (
+                <div className="m-auto w-full max-w-sm py-6 text-center">
+                  <div className="mx-auto w-fit rounded-full bg-ink p-1.5 ring-1 ring-haldi/40">
+                    <Avatar name={partner.display_name} gender={partner.gender} size={72} />
+                  </div>
+                  <p className="mt-5 font-display text-2xl text-haldi">Say hi to {firstName} 👋</p>
+                  <p className="mx-auto mt-2 max-w-xs text-sm leading-relaxed text-paper/60">The 2-minute clock starts once you&apos;ve both sent a message.</p>
+                  {!timer.expired && (
+                    <div className="mt-6 flex flex-wrap justify-center gap-2">
+                      {ICEBREAKERS.map((line) => (
+                        <button
+                          key={line}
+                          type="button"
+                          onClick={() => fillComposer(line)}
+                          className="rounded-full border border-paper/15 bg-ink-2 px-3.5 py-2 text-sm text-paper/80 transition-colors hover:border-haldi hover:text-haldi"
+                        >
+                          {line}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="mx-auto mb-4 w-fit rounded-full bg-ink-2/90 px-3 py-1 text-center text-[11px] font-semibold text-paper/45">
+                  A room for just the two of you
+                </p>
+              )}
+              {messages.map((m, i) => (
+                <MessageBubble
+                  key={m.id}
+                  message={m}
+                  mine={m.sender_id === me.clerk_id}
+                  partnerId={partner.clerk_id}
+                  groupStart={messages[i - 1]?.sender_id !== m.sender_id}
+                  groupEnd={messages[i + 1]?.sender_id !== m.sender_id}
+                />
+              ))}
+              <div ref={bottom} />
+            </div>
+          </div>
+          {billingEnabled && <TimerExpiredOverlay show={timer.expired && sheet === null} onExtend={openSheet} />}
+        </div>
+
+        {closedFree ? (
+          <div role="status" className="border-t border-paper/10 bg-ink-2 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4 sm:px-5">
+            <div className="mx-auto flex max-w-2xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="font-display text-lg text-paper">Time&apos;s up</p>
+                <p className="text-sm text-paper/70">Your 2-minute chat has ended. Your messages are still here to read.</p>
+              </div>
+              <Link href="/dashboard" className={buttonVariants({ variant: 'haldi', className: 'w-full shrink-0 sm:w-auto' })}>
+                Back to dancers
+              </Link>
+            </div>
+          </div>
+        ) : (
+          <form
+            onSubmit={send}
+            className={cn(
+              'border-t border-paper/10 bg-ink-2 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 transition-[filter,opacity] sm:px-5',
+              timer.expired && 'opacity-50 blur-[1px]',
+            )}
+          >
+            {sendError && (
+              <p role="alert" className="mx-auto mb-2 max-w-2xl px-2 text-xs text-[#E58A7F]">
+                {sendError}
+              </p>
+            )}
+            <div className="mx-auto flex max-w-2xl items-center gap-2 rounded-full border border-paper/15 bg-ink p-1.5 pl-5 transition-colors focus-within:border-haldi">
+              <input
+                ref={composer}
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                disabled={timer.expired}
+                maxLength={1000}
+                aria-label="Message"
+                autoComplete="off"
+                enterKeyHint="send"
+                placeholder={timer.expired ? 'Chat closed' : `Message ${firstName}…`}
+                className="h-10 min-w-0 flex-1 bg-transparent text-[15px] text-paper placeholder:text-paper/35 focus:outline-none disabled:cursor-not-allowed"
+              />
+              {text.length > 900 && <span className="tabular shrink-0 text-[11px] text-paper/45">{1000 - text.length}</span>}
+              <motion.button
+                whileTap={{ scale: 0.9 }}
+                type="submit"
+                disabled={timer.expired || !text.trim()}
+                aria-label="Send"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-kumkum text-paper transition-colors hover:bg-kumkum-dark disabled:bg-paper/10 disabled:text-paper/35"
+              >
+                <SendHorizontal className="h-[18px] w-[18px]" />
+              </motion.button>
+            </div>
+          </form>
+        )}
+      </section>
+
+      <RoomSidebar
+        partner={partner}
+        partnerHere={partnerHere}
+        bothSpoke={bothSpoke}
+        started={timer.started}
+        expired={timer.expired}
+        className="relative hidden lg:flex"
+      />
+
+      {billingEnabled && <ExtendModal open={sheet === 'extend'} onClose={() => setSheet(null)} onPay={startPayment} busy={busy} error={payError} />}
       <Toast message={toast} onDone={() => setToast(null)} />
     </main>
   );

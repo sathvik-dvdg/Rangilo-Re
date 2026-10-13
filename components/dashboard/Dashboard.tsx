@@ -28,27 +28,45 @@ const FILTERS: { id: Filter; label: string }[] = [
 const BRANCH_OPTIONS = ['All Branches', 'CSE', 'ISE', 'AIML', 'ECE', 'MECH', 'CIVIL', 'AIDS'];
 const YEAR_OPTIONS = ['All Years', '1st Year', '2nd Year', '3rd Year', '4th Year'];
 
+// Phone: a flat list, one dancer per row. Laptop: bordered cards, two per row when there is room.
+// Two-up cards are narrower, so their tags wrap onto a third line and the row is taller.
 const ROW = 96;
+const ROW_TWO_UP = 116;
+const DESKTOP_QUERY = '(min-width: 1024px)';
+const TWO_COLUMN_MIN_WIDTH = 680;
 
 type RowData = {
-  items: PublicProfile[];
+  rows: PublicProfile[][];
+  cols: number;
   onlineIds: Set<string>;
   revealed: Record<string, { real_name: string; email: string }>;
   open: (u: PublicProfile) => void;
 };
 
 function Row({ index, style, data }: ListChildComponentProps<RowData>) {
-  const u = data.items[index];
+  return (
+    <div style={{ ...style, gridTemplateColumns: `repeat(${data.cols}, minmax(0, 1fr))` }} className="grid gap-x-3 px-1 lg:px-0">
+      {data.rows[index].map((u) => (
+        <DancerCard key={u.clerk_id} u={u} index={index} data={data} />
+      ))}
+    </div>
+  );
+}
+
+function DancerCard({ u, index, data }: { u: PublicProfile; index: number; data: RowData }) {
   const online = data.onlineIds.has(u.clerk_id);
   const unlocked = data.revealed[u.clerk_id];
   return (
-    <div style={style} className="px-1">
+    <div className="min-w-0">
       <motion.button
         initial={{ opacity: 0, x: -20 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ delay: Math.min(index, 15) * 0.04 }}
         onClick={() => data.open(u)}
-        className="flex h-[88px] w-full items-center gap-3.5 rounded-lg px-3 text-left transition-colors hover:bg-paper/[0.04]"
+        className={cn(
+          'flex h-[88px] w-full items-center gap-3.5 overflow-hidden rounded-lg px-3 text-left transition-colors hover:bg-paper/[0.04] lg:rounded-xl lg:border lg:border-paper/10 lg:bg-ink-2 lg:px-4 lg:hover:border-haldi/50 lg:hover:bg-ink-3',
+          data.cols === 2 ? 'lg:h-[104px]' : 'lg:h-[84px]',
+        )}
       >
         <div className="relative shrink-0">
           <Avatar name={u.display_name} gender={u.gender} online={online} />
@@ -65,7 +83,7 @@ function Row({ index, style, data }: ListChildComponentProps<RowData>) {
           )}
         </div>
 
-        <div className="min-w-0 flex-1 border-b border-paper/[0.07] pb-2 pt-2">
+        <div className="min-w-0 flex-1 border-b border-paper/[0.07] pb-2 pt-2 lg:border-b-0 lg:py-0">
           {/* Top line: Name, Unlocked badge (if revealed), Gender, Branch, Vibe */}
           <div className="flex items-center gap-1.5 flex-wrap">
             <p className="truncate font-display text-[15px] font-semibold text-paper">
@@ -194,38 +212,72 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
   // Others online (presence includes me).
   const onlineCount = Math.max(0, onlineIds.size - (userId && onlineIds.has(userId) ? 1 : 0));
 
-  // react-window needs a pixel height; measure the remaining viewport.
+  // react-window needs pixel sizes; measure the space the list has.
   const listWrap = useRef<HTMLDivElement>(null);
-  const [height, setHeight] = useState(500);
+  const [size, setSize] = useState({ width: 0, height: 500 });
   useEffect(() => {
     const el = listWrap.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setHeight(el.clientHeight));
+    const measure = () => setSize({ width: el.clientWidth, height: el.clientHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
   }, [users]);
 
-  const itemData = useMemo<RowData>(
-    () => ({
-      items: visible,
+  const [desktop, setDesktop] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia(DESKTOP_QUERY);
+    const sync = () => setDesktop(mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
+  const cols = desktop && size.width >= TWO_COLUMN_MIN_WIDTH ? 2 : 1;
+
+  const itemData = useMemo<RowData>(() => {
+    const rows: PublicProfile[][] = [];
+    for (let i = 0; i < visible.length; i += cols) rows.push(visible.slice(i, i + cols));
+    return {
+      rows,
+      cols,
       onlineIds,
       revealed,
       open: (u) => userId && router.push(`/chat/${encodeURIComponent(roomIdFor(userId, u.clerk_id))}`),
-    }),
-    [visible, onlineIds, revealed, userId, router],
+    };
+  }, [visible, cols, onlineIds, revealed, userId, router]);
+
+  const lobbyNotice = (
+    <div className="flex items-center gap-2 rounded-xl border border-haldi/20 bg-ink-2/80 px-3.5 py-2 text-xs text-paper/75 shadow-sm lg:bg-ink/60">
+      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-haldi/15 text-haldi">
+        <Lock className="h-3 w-3" />
+      </span>
+      <p className="leading-snug">
+        <strong className="text-haldi font-bold">Anonymous Lobby:</strong> All dancer profiles are locked. Tap anyone to start a 2-min chat.
+      </p>
+    </div>
   );
 
   return (
     <main className="flex h-[100dvh] flex-col bg-ink pt-16">
       {me && (
-        <>
-          <div className="stitch-b bg-ink-2">
-            <div className="mx-auto max-w-3xl px-4 py-4 sm:px-6">
-              <div className="flex items-center gap-4">
+        // Phone: profile, filters and list stacked. Laptop: profile panel on the left, dancers on the right.
+        <div className="mx-auto flex min-h-0 w-full flex-1 flex-col lg:max-w-6xl lg:flex-row lg:gap-6 lg:px-6 lg:py-6">
+          <aside className="stitch-b shrink-0 bg-ink-2 lg:w-[300px] lg:self-start lg:rounded-2xl lg:border lg:border-solid lg:border-paper/10 xl:w-[340px]">
+            <div className="relative mx-auto max-w-3xl px-4 py-4 sm:px-6 lg:max-w-none lg:p-5">
+              {/* On laptop the panel is narrow, so the edit button sits beside the avatar instead of among the tags. */}
+              <button
+                type="button"
+                onClick={() => setEditOpen(true)}
+                className="absolute right-5 top-5 hidden rounded border border-paper/15 px-2.5 py-1 text-xs font-semibold text-paper/70 transition-colors hover:border-haldi hover:text-haldi lg:block"
+              >
+                Edit Profile
+              </button>
+              <div className="flex items-center gap-4 lg:flex-col lg:items-start lg:gap-3">
                 <Avatar name={me.display_name} gender={me.gender} size={48} />
-                <div className="min-w-0 flex-1">
+                <div className="min-w-0 flex-1 lg:w-full">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <p className="truncate font-display text-lg text-haldi">{me.display_name}</p>
+                    <p className="truncate font-display text-lg text-haldi lg:w-full">{me.display_name}</p>
                     <GenderBadge gender={me.gender} />
                     {(me.branch || me.college_year) && (
                       <span className="rounded bg-paper/10 px-2 py-0.5 text-[11px] font-bold text-paper/80">
@@ -240,13 +292,14 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
                     <button
                       type="button"
                       onClick={() => setEditOpen(true)}
-                      className="ml-auto rounded border border-paper/15 px-2.5 py-1 text-xs font-semibold text-paper/70 hover:border-haldi hover:text-haldi transition-colors"
+                      className="ml-auto rounded border border-paper/15 px-2.5 py-1 text-xs font-semibold text-paper/70 hover:border-haldi hover:text-haldi transition-colors lg:hidden"
                     >
                       Edit Profile
                     </button>
                   </div>
                   <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-paper/60">
-                    <p>
+                    {/* The laptop panel shows this count as a tile below. */}
+                    <p className="lg:hidden">
                       <span className="mr-1.5 inline-block h-2 w-2 rounded-full bg-[#7FB069] align-middle" />
                       Online: <span className="tabular font-bold text-paper">{onlineCount}</span> dancers tonight
                     </p>
@@ -258,13 +311,38 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
                   </div>
                 </div>
               </div>
+
+              <dl className="mt-4 hidden grid-cols-2 gap-3 lg:grid">
+                <div className="rounded-xl bg-ink/60 px-3.5 py-3">
+                  <dt className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-paper/45">
+                    <span className="h-1.5 w-1.5 rounded-full bg-[#7FB069]" />
+                    Online now
+                  </dt>
+                  <dd className="tabular mt-1 font-display text-2xl text-paper">{onlineCount}</dd>
+                </div>
+                <div className="rounded-xl bg-ink/60 px-3.5 py-3">
+                  <dt className="text-[10px] font-bold uppercase tracking-[0.16em] text-paper/45">Dancers</dt>
+                  <dd className="tabular mt-1 font-display text-2xl text-paper">{users ? users.length : '–'}</dd>
+                </div>
+              </dl>
+              <div className="mt-3 hidden lg:block">{lobbyNotice}</div>
             </div>
-          </div>
+          </aside>
 
           <CampusEnergyBattle users={users} onlineIds={onlineIds} me={me} />
 
-          <div className="mx-auto w-full max-w-3xl px-4 pt-5 sm:px-6">
-            <label className="flex h-11 items-center gap-3 rounded-full border border-paper/15 bg-ink-2 px-4 focus-within:border-haldi">
+          <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className="mx-auto w-full max-w-3xl px-4 pt-5 sm:px-6 lg:max-w-none lg:px-0 lg:pt-0">
+            <div className="mb-4 hidden items-baseline justify-between gap-4 lg:flex">
+              <h1 className="font-display text-2xl text-paper">On the floor tonight</h1>
+              {users && (
+                <p className="text-sm text-paper/50">
+                  <span className="tabular font-bold text-paper/80">{visible.length}</span> {visible.length === 1 ? 'dancer' : 'dancers'}
+                </p>
+              )}
+            </div>
+            <div className="lg:flex lg:items-center lg:gap-3">
+            <label className="flex h-11 items-center gap-3 rounded-full border border-paper/15 bg-ink-2 px-4 focus-within:border-haldi lg:min-w-0 lg:flex-1">
               <Search className="h-4 w-4 text-paper/40" />
               <input
                 value={query}
@@ -278,7 +356,7 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
             </label>
 
             {/* Main quick filters */}
-            <div role="group" aria-label="Filter dancers" className="mt-4 flex gap-2 overflow-x-auto pb-1">
+            <div role="group" aria-label="Filter dancers" className="mt-4 flex gap-2 overflow-x-auto pb-1 lg:mt-0 lg:shrink-0 lg:pb-0">
               {FILTERS.map((f) => (
                 <button
                   key={f.id}
@@ -292,6 +370,7 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
                   {f.label}
                 </button>
               ))}
+            </div>
             </div>
 
             {/* Department, Year & Vibe filters */}
@@ -352,21 +431,10 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
             </div>
           </div>
 
-          {/* Lobby Locked Profiles Notice */}
-          <div className="mx-auto w-full max-w-3xl px-4 pt-3 sm:px-6">
-            <div className="flex items-center justify-between gap-2.5 rounded-xl border border-haldi/20 bg-ink-2/80 px-3.5 py-2 text-xs text-paper/75 shadow-sm">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-haldi/15 text-haldi">
-                  <Lock className="h-3 w-3" />
-                </span>
-                <p className="leading-snug">
-                  <strong className="text-haldi font-bold">Anonymous Lobby:</strong> All dancer profiles are locked. Tap anyone to start a 2-min chat.
-                </p>
-              </div>
-            </div>
-          </div>
+          {/* Lobby Locked Profiles Notice (in the side panel on laptop screens) */}
+          <div className="mx-auto w-full max-w-3xl px-4 pt-3 sm:px-6 lg:hidden">{lobbyNotice}</div>
 
-          <div ref={listWrap} className="mx-auto mt-2 w-full max-w-3xl flex-1 overflow-hidden px-3 sm:px-5">
+          <div ref={listWrap} className="mx-auto mt-2 min-h-0 w-full max-w-3xl flex-1 overflow-hidden px-3 sm:px-5 lg:mt-3 lg:max-w-none lg:px-0">
             {error ? (
               <div role="alert" className="flex flex-col items-start gap-4 p-6 text-paper/75">
                 <p>{error}</p>
@@ -389,12 +457,20 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
                 <p className="mt-2 text-sm">Try a different filter, or wait — the night is young.</p>
               </div>
             ) : (
-              <FixedSizeList height={height} width="100%" itemCount={visible.length} itemSize={ROW} itemData={itemData} itemKey={(i, d) => d.items[i].clerk_id}>
+              <FixedSizeList
+                height={size.height}
+                width="100%"
+                itemCount={itemData.rows.length}
+                itemSize={cols === 2 ? ROW_TWO_UP : ROW}
+                itemData={itemData}
+                itemKey={(i, d) => d.rows[i][0].clerk_id}
+              >
                 {Row}
               </FixedSizeList>
             )}
           </div>
-        </>
+          </section>
+        </div>
       )}
 
       <OnboardingModal

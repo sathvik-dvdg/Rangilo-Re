@@ -2,7 +2,7 @@
 
 import { AnimatePresence, motion } from 'framer-motion';
 import Link from 'next/link';
-import { Sparkles, Infinity as InfinityIcon, UserCheck } from 'lucide-react';
+import { Hourglass, MessageSquare, Sparkles } from 'lucide-react';
 import { Button, buttonVariants } from '@/components/ui/button';
 
 export function Diya({ className }: { className?: string }) {
@@ -19,16 +19,11 @@ export function Diya({ className }: { className?: string }) {
   );
 }
 
-/** Paid Mode: offers unlimited chat & real identity unlock for ₹29. */
-export function TimerExpiredOverlay({
-  show,
-  partnerName,
-  onExtend,
-}: {
-  show: boolean;
-  partnerName?: string;
-  onExtend: () => void;
-}) {
+/**
+ * Paid Mode only: offers the ₹29 extension, which adds two minutes. Free Mode shows a closed-chat panel in ChatRoom instead.
+ * The perks listed here must match what a payment actually grants (lib/payments.ts); identity is never one of them (DEC-002).
+ */
+export function TimerExpiredOverlay({ show, onExtend }: { show: boolean; onExtend: () => void }) {
   return (
     <AnimatePresence>
       {show && (
@@ -57,28 +52,28 @@ export function TimerExpiredOverlay({
               Your free 2-minute chat preview has ended.
             </p>
 
-            {/* Perks card showing what ₹29 unlocks */}
+            {/* Perks card showing what ₹29 buys */}
             <div className="mt-4 rounded-xl border border-paper/10 bg-ink/60 p-3.5 text-left space-y-2.5">
               <p className="text-[11px] font-bold uppercase tracking-wider text-haldi flex items-center gap-1.5">
                 <Sparkles className="h-3.5 w-3.5 text-haldi" />
-                Unlock For Just ₹29:
+                Keep Going For ₹29:
               </p>
 
               <div className="flex items-start gap-2.5 text-xs text-paper/90">
                 <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#7FB069]/20 text-[#9CC587]">
-                  <InfinityIcon className="h-3.5 w-3.5" />
+                  <Hourglass className="h-3.5 w-3.5" />
                 </span>
                 <div>
-                  <strong className="text-paper">Unlimited Chat:</strong> No time limit. Keep messaging as long as you want!
+                  <strong className="text-paper">2 more minutes:</strong> Added to this chat as soon as you pay.
                 </div>
               </div>
 
               <div className="flex items-start gap-2.5 text-xs text-paper/90">
                 <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-haldi/20 text-haldi">
-                  <UserCheck className="h-3.5 w-3.5" />
+                  <MessageSquare className="h-3.5 w-3.5" />
                 </span>
                 <div>
-                  <strong className="text-paper">Real Name & Profile:</strong> View {partnerName ? `${partnerName}'s` : "their"} real name & verified contact details!
+                  <strong className="text-paper">Same conversation:</strong> Your messages so far stay right here.
                 </div>
               </div>
             </div>
@@ -89,7 +84,7 @@ export function TimerExpiredOverlay({
               className="mt-5 w-full text-sm font-bold shadow-lg shadow-haldi/20"
               onClick={onExtend}
             >
-              Extend Chat ₹29 (Unlock Unlimited) →
+              Extend Chat ₹29 →
             </Button>
 
             {/* Paying is optional: always offer a way out next to the offer. */}
