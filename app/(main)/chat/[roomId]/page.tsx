@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { auth } from '@clerk/nextjs/server';
+import { getBillingStatus } from '@/lib/billing';
 import { getClerkConfigProblems } from '@/lib/clerkConfig';
 import { ChatRoom } from '@/components/chat/ChatRoom';
 import { HttpError, getRoomState } from '@/lib/server';
@@ -17,7 +18,8 @@ export default async function ChatPage({ params }: { params: { roomId: string } 
 
   try {
     const state = await getRoomState(decodeURIComponent(params.roomId), userId);
-    return <ChatRoom key={state.roomId} initial={state} />;
+    // Only hides or shows payment UI; the billing routes enforce the mode themselves.
+    return <ChatRoom key={state.roomId} initial={state} billingEnabled={getBillingStatus().mode === 'paid'} renderedAt={Date.now()} />;
   } catch (e) {
     if (e instanceof HttpError && e.status === 409) redirect('/dashboard');
     const message = e instanceof HttpError ? e.message : 'Could not open this chat';

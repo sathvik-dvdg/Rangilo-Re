@@ -17,6 +17,7 @@ export function Diya({ className }: { className?: string }) {
   );
 }
 
+/** Paid Mode only: offers the extension. Free Mode shows a closed-chat panel in ChatRoom instead. */
 export function TimerExpiredOverlay({ show, onExtend }: { show: boolean; onExtend: () => void }) {
   return (
     <AnimatePresence>
