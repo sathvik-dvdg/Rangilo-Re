@@ -178,6 +178,8 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
     if (!me) return;
     setError(null);
     setUsers(null);
+
+    // Fetch dancers
     fetch('/api/users')
       .then(async (r) => {
         const d = await r.json().catch(() => ({}));
@@ -185,7 +187,19 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
         setUsers(d.users);
       })
       .catch((e: Error) => setError(e.message || 'Could not load dancers. Try again in a moment.'));
-  }, [me, attempt]);
+
+    // Fetch unlocked profiles so real names and unlocked status persist across refreshes
+    fetch('/api/reveals')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.revealed) {
+          for (const [targetId, identity] of Object.entries(d.revealed)) {
+            setRevealedInStore(targetId, identity as { real_name: string; email: string });
+          }
+        }
+      })
+      .catch(() => {});
+  }, [me, attempt, setRevealedInStore]);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -193,8 +207,11 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
       .filter((u) => {
         if (!q) return true;
         const matchesName = u.display_name.toLowerCase().includes(q);
+        const matchesRealName = revealed[u.clerk_id]?.real_name
+          ? revealed[u.clerk_id].real_name.toLowerCase().includes(q)
+          : false;
         const matchesOutfit = u.outfit_color ? u.outfit_color.toLowerCase().includes(q) : false;
-        return matchesName || matchesOutfit;
+        return matchesName || matchesRealName || matchesOutfit;
       })
       .filter((u) => {
         if (filter === 'online') return onlineIds.has(u.clerk_id);
