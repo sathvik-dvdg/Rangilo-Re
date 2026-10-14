@@ -64,10 +64,10 @@ export function HeroSection() {
             className="mt-5 max-w-md space-y-3 text-base leading-relaxed text-paper/80 sm:mt-6 sm:text-lg"
           >
             <p className="font-medium text-paper">
-              Why wait for your partner to reply when you can find a new one yourself? 😄
+              Find a Garba partner at tonight&apos;s event — no waiting, no awkward circles.
             </p>
             <p className="text-sm leading-relaxed text-paper/70 sm:text-base">
-              Those ignored messages are not going to reply anytime soon. Try your luck and show off your Garba skills here—you never know who might be waiting to match your vibe!
+              Join, browse who is dancing tonight, and start a private two-minute chat. Made for Navratri nights.
             </p>
           </motion.div>
 
