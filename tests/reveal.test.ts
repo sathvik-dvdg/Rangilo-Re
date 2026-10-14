@@ -1,6 +1,6 @@
 // ID-001..003, PRIV-001: a dancer's real name and photo are shown to another dancer only
 // after the first agreed to share with that person, and a verified payment followed.
-// Clerk, the database and push are mocked; billing is the real module with fake keys.
+// Clerk and the database are mocked; billing is the real module with fake keys.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type Row = Record<string, unknown>;
@@ -12,7 +12,6 @@ const mocks = vi.hoisted(() => ({
   missingTable: false,
   photos: {} as Record<string, string | null>,
   clerkDown: false,
-  notifyRevealRequest: vi.fn(async () => {}),
 }));
 
 vi.mock('@clerk/nextjs/server', () => ({
@@ -30,7 +29,6 @@ vi.mock('@clerk/nextjs/server', () => ({
     },
   }),
 }));
-vi.mock('@/lib/push', () => ({ notifyRevealRequest: mocks.notifyRevealRequest }));
 
 // In-memory tables. Any table not listed here (the old `reveals` table in particular) throws.
 vi.mock('@/lib/supabaseAdmin', () => ({
@@ -107,7 +105,6 @@ beforeEach(() => {
   mocks.missingTable = false;
   mocks.photos = { user_bob: 'https://img.example/bob.jpg' };
   mocks.clerkDown = false;
-  mocks.notifyRevealRequest.mockClear();
   vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 afterEach(() => {
@@ -139,17 +136,15 @@ describe('POST /api/rooms/[roomId]/reveal', () => {
       say('user_alice');
       expect((await act('request')).status).toBe(409);
       expect(requests()).toEqual([]);
-      expect(mocks.notifyRevealRequest).not.toHaveBeenCalled();
     });
 
-    it('creates a pending request from the caller about their partner, and tells the partner by nickname', async () => {
+    it('creates a pending request from the caller about their partner', async () => {
       say('user_alice');
       say('user_bob');
       const res = await act('request');
       expect(res.status).toBe(200);
       expect((await res.json()).reveal).toMatchObject({ outgoing: 'pending', incoming: 'none' });
       expect(requests()).toEqual([expect.objectContaining({ requester_id: 'user_alice', target_id: 'user_bob', status: 'pending', payment_id: null })]);
-      expect(mocks.notifyRevealRequest).toHaveBeenCalledWith('user_bob', 'DiyaDancer_Avni_4821', ROOM);
     });
 
     it('asking does not show the asker anything', async () => {

@@ -98,21 +98,22 @@ export async function loadRoom(roomId: string, userId: string) {
   if (!partnerId) throw new HttpError(403, 'Room is full');
 
   const db = supabaseAdmin();
-  const [me, partner] = await Promise.all([getProfile(userId), getProfile(partnerId)]);
+  // Independent reads, so one round trip instead of three. Nothing is returned before every check below passes.
+  const [me, partner, { data: senders, error: sErr }, roomRead] = await Promise.all([
+    getProfile(userId),
+    getProfile(partnerId),
+    db.from('messages').select('sender_id').eq('room_id', roomId),
+    db.from('rooms').select('id, participant_ids, timer_started_at').eq('id', roomId).maybeSingle(),
+  ]);
   if (!me) throw new HttpError(409, 'Finish onboarding first');
   if (!partner) throw new HttpError(404, 'That dancer has left');
 
-  const { data: senders, error: sErr } = await db.from('messages').select('sender_id').eq('room_id', roomId);
   if (sErr) throw sErr;
   const distinct = new Set((senders ?? []).map((r) => r.sender_id as string));
   distinct.add(userId);
   if (distinct.size > 2) throw new HttpError(403, 'Room is full');
 
-  let { data: room, error: rErr } = await db
-    .from('rooms')
-    .select('id, participant_ids, timer_started_at')
-    .eq('id', roomId)
-    .maybeSingle();
+  let { data: room, error: rErr } = roomRead;
   if (rErr) throw rErr;
   if (!room) {
     const ins = await db

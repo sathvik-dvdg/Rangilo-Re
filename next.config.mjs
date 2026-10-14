@@ -1,9 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  transpilePackages: ['three'],
   experimental: {
-    serverComponentsExternalPackages: ['razorpay', 'web-push'],
+    serverComponentsExternalPackages: ['razorpay'],
+    // Rewrites barrel imports to the modules actually used, so dev compiles hundreds fewer files.
+    optimizePackageImports: ['framer-motion'],
   },
 };
 
