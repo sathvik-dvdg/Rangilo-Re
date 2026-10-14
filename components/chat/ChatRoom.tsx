@@ -18,7 +18,6 @@ import { Toast } from '@/components/ui/Toast';
 import { useRoomRealtime } from '@/hooks/useSupabaseRealtime';
 import { useChatTimer } from '@/hooks/useChatTimer';
 import { useRazorpay } from '@/hooks/useRazorpay';
-import { useAppStore } from '@/store/useAppStore';
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { fireCelebration } from '@/lib/confetti';
@@ -45,18 +44,6 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
   const bottom = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLInputElement>(null);
 
-  // Opening the chat clears this partner's unread badge (NOTIF-001), once the tab is actually on screen.
-  const clearUnread = useAppStore((s) => s.clearUnread);
-  const partnerUnread = useAppStore((s) => s.unread[partner.clerk_id] ?? 0);
-  useEffect(() => {
-    if (!partnerUnread) return;
-    const clear = () => {
-      if (document.visibilityState === 'visible') clearUnread(partner.clerk_id);
-    };
-    clear();
-    document.addEventListener('visibilitychange', clear);
-    return () => document.removeEventListener('visibilitychange', clear);
-  }, [partnerUnread, partner.clerk_id, clearUnread]);
   const { pay, busy, error: payError, clearError } = useRazorpay();
 
   const timer = useChatTimer(timerStartedAt, extraSeconds, renderedAt);

@@ -14,7 +14,7 @@ import { isId, recordAdminAction, requireAdmin } from '@/lib/admin';
 
 /**
  * Removes a dancer: their profile, every room they are in (with its messages
- * and extensions), any reveals involving them, and their push subscriptions.
+ * and extensions), and any reveals involving them.
  * Payment ledger rows are kept (PRIV-004). With `block`, the Clerk account is
  * banned first, which ends their sessions and stops them signing in again;
  * without it they can sign in and onboard afresh.

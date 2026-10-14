@@ -11,7 +11,6 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@clerk/nextjs/server', () => ({ auth: () => ({ userId: 'user_alice' }) }));
-vi.mock('@/lib/push', () => ({ notifyNewMessage: async () => {} }));
 vi.mock('@/lib/supabaseAdmin', () => ({
   supabaseAdmin: () => ({
     from: (table: string) => {

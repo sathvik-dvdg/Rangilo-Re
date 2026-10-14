@@ -82,15 +82,16 @@ export async function listRevealed(viewerId: string): Promise<({ clerk_id: strin
   const ids = (data ?? []).map((r) => r.target_id as string);
   if (ids.length === 0) return [];
 
-  const people = await db.from('users').select('clerk_id, real_name').in('clerk_id', ids);
+  // The names and the photos come from different services; ask both at once.
+  const [people, images] = await Promise.all([
+    db.from('users').select('clerk_id, real_name').in('clerk_id', ids),
+    Promise.resolve()
+      .then(() => clerkClient().users.getUserList({ userId: ids, limit: ids.length }))
+      .then(({ data: accounts }) => new Map(accounts.filter((a) => a.hasImage).map((a) => [a.id, a.imageUrl])))
+      // Names without photos are better than nothing if Clerk cannot be reached.
+      .catch(() => new Map<string, string>()),
+  ]);
   if (people.error) throw people.error;
-  const images = new Map<string, string>();
-  try {
-    const { data: accounts } = await clerkClient().users.getUserList({ userId: ids, limit: ids.length });
-    for (const account of accounts) if (account.hasImage) images.set(account.id, account.imageUrl);
-  } catch {
-    // Names without photos are better than nothing if Clerk cannot be reached.
-  }
   return (people.data ?? []).map((p) => ({
     clerk_id: p.clerk_id as string,
     real_name: typeof p.real_name === 'string' ? p.real_name.trim() : '',
