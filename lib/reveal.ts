@@ -55,9 +55,25 @@ async function realName(userId: string): Promise<string> {
  */
 export async function getRevealed(viewerId: string, targetId: string): Promise<RevealedIdentity | null> {
   const request = await findRequest(viewerId, targetId);
-  if (request?.status !== 'revealed') return null;
-  const [real_name, image_url] = await Promise.all([realName(targetId), profileImage(targetId)]);
-  return { real_name, image_url };
+  if (request?.status === 'revealed') {
+    const [real_name, image_url] = await Promise.all([realName(targetId), profileImage(targetId)]);
+    return { real_name, image_url };
+  }
+  try {
+    const { data: rev } = await supabaseAdmin()
+      .from('reveals')
+      .select('target_id')
+      .eq('payer_id', viewerId)
+      .eq('target_id', targetId)
+      .maybeSingle();
+    if (rev) {
+      const [real_name, image_url] = await Promise.all([realName(targetId), profileImage(targetId)]);
+      return { real_name, image_url };
+    }
+  } catch {
+    // ignores table if missing or in tests
+  }
+  return null;
 }
 
 /** Both directions between two dancers, for the chat. */
@@ -74,12 +90,16 @@ const LIST_LIMIT = 100;
 /** Everyone whose name and photo this viewer may see, for the dancer list. */
 export async function listRevealed(viewerId: string): Promise<({ clerk_id: string } & RevealedIdentity)[]> {
   const db = supabaseAdmin();
+  let revIds: string[] = [];
+  try {
+    const { data: revData } = await db.from('reveals').select('target_id').eq('payer_id', viewerId).limit(LIST_LIMIT);
+    if (revData) revIds = revData.map((r) => r.target_id as string);
+  } catch {}
+
   const { data, error } = await db.from('reveal_requests').select('target_id').eq('requester_id', viewerId).eq('status', 'revealed').limit(LIST_LIMIT);
-  if (error) {
-    if (isMissingTable(error)) return [];
-    throw error;
-  }
-  const ids = (data ?? []).map((r) => r.target_id as string);
+  if (error && !isMissingTable(error)) throw error;
+  const reqIds = (data ?? []).map((r) => r.target_id as string);
+  const ids = Array.from(new Set([...reqIds, ...revIds]));
   if (ids.length === 0) return [];
 
   // The names and the photos come from different services; ask both at once.

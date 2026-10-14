@@ -4,6 +4,7 @@ import { supabaseAdmin } from './supabaseAdmin';
 import { diagnoseDbError } from './dbDiagnosis';
 import { FREE_CHAT_MS, effectiveExtraSeconds, partnerFromRoomId } from './room';
 import { getRevealState, getRevealed } from './reveal';
+export { getRevealed };
 import type { MyProfile, PublicProfile, RoomState } from './types';
 
 export const PUBLIC_COLUMNS = 'clerk_id, display_name, gender, last_seen';
@@ -137,6 +138,7 @@ export async function extraSecondsFor(roomId: string, timerStartedAt: string | n
 
 export function isExpired(timerStartedAt: string | null, extraSeconds: number) {
   if (!timerStartedAt) return false;
+  if (extraSeconds >= 86400) return false;
   return Date.now() - new Date(timerStartedAt).getTime() >= FREE_CHAT_MS + extraSeconds * 1000;
 }
 

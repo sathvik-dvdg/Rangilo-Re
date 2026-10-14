@@ -47,8 +47,11 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
   const { pay, busy, error: payError, clearError } = useRazorpay();
 
   const timer = useChatTimer(timerStartedAt, extraSeconds, renderedAt);
+  // An unlocked profile or room extension gives unlimited chat time with no time limit!
+  const isUnlocked = Boolean(revealed) || extraSeconds >= 86400;
+  const isExpired = isUnlocked ? false : timer.expired;
   // Free Mode has no extension, so a closed chat stays readable instead of blurring behind an overlay.
-  const closedFree = timer.expired && !billingEnabled;
+  const closedFree = isExpired && !billingEnabled;
 
   const refresh = useCallback(async () => {
     const res = await fetch(`/api/rooms/${encodeURIComponent(roomId)}`);
@@ -149,7 +152,7 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
   const send = async (e: React.FormEvent) => {
     e.preventDefault();
     const body = text.trim();
-    if (!body || timer.expired) return;
+    if (!body || isExpired) return;
     setText('');
     setSendError(null);
     const temp: Message = {
@@ -190,7 +193,7 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
     // Whatever was bought shows up only because the server now reports it (PAY-014).
     await refresh();
     fireCelebration();
-    setToast(type === 'reveal' ? 'Name and photo shared with you' : '+2 minutes added');
+    setToast('Unlimited chat & real identity unlocked! 🎉');
   };
 
   const openSheet = (which: 'extend' | 'reveal') => {
@@ -267,11 +270,11 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
               onBuy={() => openSheet('reveal')}
             />
           )}
-          <ChatTimer started={timer.started} remaining={timer.remaining} total={timer.total} fraction={timer.fraction} waitingFor={waitingFor} />
+          <ChatTimer started={timer.started} remaining={timer.remaining} total={timer.total} fraction={timer.fraction} waitingFor={waitingFor} isUnlocked={isUnlocked} />
         </header>
 
         <div className="relative min-h-0 flex-1 overflow-hidden">
-          <div className={cn('bandhani h-full overflow-y-auto px-3 py-5 transition-[filter] duration-500 sm:px-5', timer.expired && billingEnabled && 'pointer-events-none blur-[3px]')}>
+          <div className={cn('bandhani h-full overflow-y-auto px-3 py-5 transition-[filter] duration-500 sm:px-5', isExpired && billingEnabled && 'pointer-events-none blur-[3px]')}>
             <div className="mx-auto flex min-h-full max-w-2xl flex-col">
               {messages.length === 0 ? (
                 <div className="m-auto w-full max-w-sm py-6 text-center">
@@ -280,7 +283,7 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
                   </div>
                   <p className="mt-5 font-display text-2xl text-haldi">Say hi to {firstName} 👋</p>
                   <p className="mx-auto mt-2 max-w-xs text-sm leading-relaxed text-paper/60">The 2-minute clock starts once you&apos;ve both sent a message.</p>
-                  {!timer.expired && (
+                  {!isExpired && (
                     <div className="mt-6 flex flex-wrap justify-center gap-2">
                       {ICEBREAKERS.map((line) => (
                         <button
@@ -313,7 +316,7 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
               <div ref={bottom} />
             </div>
           </div>
-          {billingEnabled && <TimerExpiredOverlay show={timer.expired && sheet === null} onExtend={() => openSheet('extend')} />}
+          {billingEnabled && <TimerExpiredOverlay show={isExpired && sheet === null} onExtend={() => openSheet('extend')} />}
         </div>
 
         {closedFree ? (
@@ -333,7 +336,7 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
             onSubmit={send}
             className={cn(
               'border-t border-paper/10 bg-ink-2 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 transition-[filter,opacity] sm:px-5',
-              timer.expired && 'opacity-50 blur-[1px]',
+              isExpired && 'opacity-50 blur-[1px]',
             )}
           >
             {sendError && (
@@ -346,19 +349,19 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
                 ref={composer}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                disabled={timer.expired}
+                disabled={isExpired}
                 maxLength={1000}
                 aria-label="Message"
                 autoComplete="off"
                 enterKeyHint="send"
-                placeholder={timer.expired ? 'Chat closed' : `Message ${firstName}…`}
+                placeholder={isExpired ? 'Chat closed' : `Message ${firstName}…`}
                 className="h-10 min-w-0 flex-1 bg-transparent text-[15px] text-paper placeholder:text-paper/35 focus:outline-none disabled:cursor-not-allowed"
               />
               {text.length > 900 && <span className="tabular shrink-0 text-[11px] text-paper/45">{1000 - text.length}</span>}
               <motion.button
                 whileTap={{ scale: 0.9 }}
                 type="submit"
-                disabled={timer.expired || !text.trim()}
+                disabled={isExpired || !text.trim()}
                 aria-label="Send"
                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-kumkum text-paper transition-colors hover:bg-kumkum-dark disabled:bg-paper/10 disabled:text-paper/35"
               >

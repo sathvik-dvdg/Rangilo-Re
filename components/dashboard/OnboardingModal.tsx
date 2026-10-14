@@ -65,6 +65,8 @@ export function OnboardingModal({
   useFocusTrap(dialog, open);
 
   const isEditing = Boolean(initialGender);
+  const isRealNameLocked = Boolean(initialRealName?.trim()) || isEditing;
+  const isEmailLocked = Boolean(initialEmail?.trim()) || isEditing;
 
   useEffect(() => {
     if (open) {
@@ -390,34 +392,67 @@ export function OnboardingModal({
                         </p>
                       </div>
                       <p className="mt-1.5 text-xs text-paper/60 leading-relaxed">
-                        These stay hidden from other dancers. Your real name is shown to someone only if they ask and you say yes; paying alone never reveals it. Your email is never shared.
+                        These details remain private and locked. Your real name is shown to another dancer only when chat is unlocked for ₹29 or mutually agreed. Email is never shared.
                       </p>
 
                       <div className="mt-3.5 space-y-3">
                         <div>
-                          <label className="block text-xs font-semibold text-paper/80">
-                            Real Name
-                          </label>
+                          <div className="flex items-center justify-between">
+                            <label className="block text-xs font-semibold text-paper/80">
+                              Real Name
+                            </label>
+                            {isRealNameLocked && (
+                              <span className="flex items-center gap-1 text-[11px] font-bold text-haldi/90">
+                                <Lock className="h-3 w-3" /> Locked
+                              </span>
+                            )}
+                          </div>
                           <input
                             type="text"
                             value={realName}
+                            disabled={isRealNameLocked}
+                            readOnly={isRealNameLocked}
                             onChange={(e) => setRealName(e.target.value)}
                             placeholder="e.g. Aarohi Mehta"
                             maxLength={50}
-                            className="mt-1 w-full rounded-lg border border-paper/15 bg-ink-2 px-3 py-2 text-sm text-paper placeholder:text-paper/30 focus:border-haldi focus:outline-none transition-colors"
+                            className={cn(
+                              "mt-1 w-full rounded-lg border border-paper/15 px-3 py-2 text-sm text-paper placeholder:text-paper/30 transition-colors",
+                              isRealNameLocked
+                                ? "bg-ink/60 text-paper/60 border-paper/10 cursor-not-allowed select-none"
+                                : "bg-ink-2 focus:border-haldi focus:outline-none"
+                            )}
                           />
+                          {isRealNameLocked && (
+                            <p className="mt-1 text-[11px] text-paper/40">
+                              Locked to ensure authentic identity for all dancers.
+                            </p>
+                          )}
                         </div>
                         <div>
-                          <label className="block text-xs font-semibold text-paper/80">
-                            Gmail / Email Address
-                          </label>
+                          <div className="flex items-center justify-between">
+                            <label className="block text-xs font-semibold text-paper/80">
+                              Gmail / Email Address
+                            </label>
+                            {isEmailLocked && (
+                              <span className="flex items-center gap-1 text-[11px] font-bold text-haldi/90">
+                                <Lock className="h-3 w-3" /> Locked
+                              </span>
+                            )}
+                          </div>
                           <input
                             type="email"
                             value={email}
+                            disabled={isEmailLocked}
+                            readOnly={isEmailLocked}
                             onChange={(e) => setEmail(e.target.value)}
                             placeholder="e.g. aarohi.mehta@gmail.com"
                             maxLength={80}
-                            className="mt-1 w-full rounded-lg border border-paper/15 bg-ink-2 px-3 py-2 text-sm text-paper placeholder:text-paper/30 focus:border-haldi focus:outline-none transition-colors"
+                            className={cn(
+                              "mt-1 w-full rounded-lg border border-paper/15 px-3 py-2 text-sm text-paper placeholder:text-paper/30 transition-colors",
+                              isEmailLocked
+                                ? "bg-ink/60 text-paper/60 border-paper/10 cursor-not-allowed select-none"
+                                : "bg-ink-2 focus:border-haldi focus:outline-none"
+                            )}
                           />
                         </div>
                         <div>

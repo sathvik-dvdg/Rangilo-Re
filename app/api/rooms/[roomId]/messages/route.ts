@@ -1,4 +1,4 @@
-import { HttpError, errorResponse, extraSecondsFor, isExpired, loadRoom, requireUserId } from '@/lib/server';
+import { HttpError, errorResponse, extraSecondsFor, getRevealed, isExpired, loadRoom, requireUserId } from '@/lib/server';
 
 export async function POST(req: Request, { params }: { params: { roomId: string } }) {
   try {
@@ -8,8 +8,9 @@ export async function POST(req: Request, { params }: { params: { roomId: string 
     const clean = (text ?? '').trim().slice(0, 1000);
     if (!clean) throw new HttpError(400, 'Empty message');
 
-    const { db, room } = await loadRoom(roomId, userId);
-    if (isExpired(room.timer_started_at, await extraSecondsFor(roomId, room.timer_started_at))) {
+    const { db, room, partnerId } = await loadRoom(roomId, userId);
+    const revealed = partnerId ? await getRevealed(userId, partnerId) : null;
+    if (!revealed && isExpired(room.timer_started_at, await extraSecondsFor(roomId, room.timer_started_at))) {
       throw new HttpError(403, 'Chat time is up');
     }
 

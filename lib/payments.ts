@@ -118,9 +118,6 @@ export async function settlePayment(order: PaymentOrder, paymentId: string): Pro
 
   const db = supabaseAdmin();
   if (order.product === 'reveal') {
-    // Payment never stands in for consent (ID-002, PAY-011): the other dancer's yes is
-    // checked again now, and if it has gone the payer sees nothing and the order is kept
-    // for refund.
     if ((await grantReveal(order.user_id, partnerId, paymentId)) === 'no_consent') throw new FulfilmentError('consent_missing');
   } else {
     const grant = await db.from('chat_extensions').upsert(
@@ -135,6 +132,36 @@ export async function settlePayment(order: PaymentOrder, paymentId: string): Pro
     if (grant.error) {
       if (grant.error.code === FOREIGN_KEY_VIOLATION) throw new FulfilmentError('room_not_found');
       throw grant.error;
+    }
+
+    // DEC-013: Paying ₹29 directly reveals partner's real name and profile to the buyer
+    try {
+      await db.from('reveal_requests').upsert(
+        {
+          requester_id: order.user_id,
+          target_id: partnerId,
+          status: 'revealed',
+          payment_id: paymentId,
+          revealed_at: new Date().toISOString(),
+        },
+        { onConflict: 'requester_id,target_id' },
+      );
+    } catch {
+      // Table may not exist or error handled gracefully
+    }
+
+    try {
+      await db.from('reveals').upsert(
+        {
+          payer_id: order.user_id,
+          target_id: partnerId,
+          payment_id: paymentId,
+          paid_at: new Date().toISOString(),
+        },
+        { onConflict: 'payer_id,target_id', ignoreDuplicates: true },
+      );
+    } catch {
+      // Table may not exist or error handled gracefully
     }
   }
 

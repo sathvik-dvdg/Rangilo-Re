@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils';
 export function Navbar() {
   const pathname = usePathname();
   // The chat screen has its own header.
-  if (pathname.startsWith('/chat')) return null;
+  if (pathname?.startsWith('/chat')) return null;
 
   return (
     <motion.header

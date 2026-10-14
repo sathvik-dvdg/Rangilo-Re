@@ -26,6 +26,7 @@ vi.mock('@/lib/supabaseAdmin', () => ({
 }));
 vi.mock('@/lib/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/server')>()),
+  getRevealed: async () => null,
   loadRoom: async () => ({
     me: { clerk_id: 'user_alice', display_name: 'DiyaDancer_Avni_4821' },
     partnerId: 'user_bob',
