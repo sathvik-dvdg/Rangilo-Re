@@ -187,19 +187,7 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
         setUsers(d.users);
       })
       .catch((e: Error) => setError(e.message || 'Could not load dancers. Try again in a moment.'));
-
-    // Fetch unlocked profiles so real names and unlocked status persist across refreshes
-    fetch('/api/reveals')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (d?.revealed) {
-          for (const [targetId, identity] of Object.entries(d.revealed)) {
-            setRevealedInStore(targetId, identity as { real_name: string; email: string });
-          }
-        }
-      })
-      .catch(() => {});
-  }, [me, attempt, setRevealedInStore]);
+  }, [me, attempt]);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -230,7 +218,7 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
           Number(Boolean(unread[b.clerk_id])) - Number(Boolean(unread[a.clerk_id])) ||
           Number(onlineIds.has(b.clerk_id)) - Number(onlineIds.has(a.clerk_id)),
       );
-  }, [users, query, filter, selectedBranch, selectedYear, selectedVibe, onlineIds, unread]);
+  }, [users, query, filter, selectedBranch, selectedYear, selectedVibe, onlineIds, unread, revealed]);
 
   // Others online (presence includes me).
   const onlineCount = Math.max(0, onlineIds.size - (userId && onlineIds.has(userId) ? 1 : 0));
