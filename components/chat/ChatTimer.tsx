@@ -1,7 +1,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { Hourglass } from 'lucide-react';
+import { Hourglass, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 function fmt(ms: number) {
@@ -16,13 +16,31 @@ export function ChatTimer({
   total,
   fraction,
   waitingFor,
+  isUnlocked,
 }: {
   started: boolean;
   remaining: number | null;
   total: number;
   fraction: number;
   waitingFor: string | null;
+  isUnlocked?: boolean;
 }) {
+  if (isUnlocked) {
+    return (
+      <div className="px-4 pb-3 pt-0.5 sm:px-5">
+        <div className="flex items-center justify-between text-xs">
+          <span className="flex items-center gap-1.5 font-bold text-[#9CC587]">
+            <Sparkles className="h-3.5 w-3.5 text-haldi animate-pulse" />
+            Unlimited Chat Unlocked
+          </span>
+          <span className="rounded bg-haldi/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-haldi">
+            No Time Limit ♾️
+          </span>
+        </div>
+      </div>
+    );
+  }
+
   const closed = remaining === 0;
   const urgent = remaining !== null && !closed && remaining < 30_000;
   const color = !started ? 'bg-paper/20' : fraction > 0.5 ? 'bg-haldi' : fraction > 0.25 ? 'bg-[#D9732F]' : 'bg-kumkum';

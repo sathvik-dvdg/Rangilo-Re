@@ -1,5 +1,4 @@
-import { HttpError, errorResponse, extraSecondsFor, isExpired, loadRoom, requireUserId } from '@/lib/server';
-import { notifyNewMessage } from '@/lib/push';
+import { HttpError, errorResponse, extraSecondsFor, getRevealed, isExpired, loadRoom, requireUserId } from '@/lib/server';
 
 export async function POST(req: Request, { params }: { params: { roomId: string } }) {
   try {
@@ -9,8 +8,9 @@ export async function POST(req: Request, { params }: { params: { roomId: string 
     const clean = (text ?? '').trim().slice(0, 1000);
     if (!clean) throw new HttpError(400, 'Empty message');
 
-    const { db, room, me, partnerId } = await loadRoom(roomId, userId);
-    if (isExpired(room.timer_started_at, await extraSecondsFor(roomId, room.timer_started_at))) {
+    const { db, room, partnerId } = await loadRoom(roomId, userId);
+    const revealed = partnerId ? await getRevealed(userId, partnerId) : null;
+    if (!revealed && isExpired(room.timer_started_at, await extraSecondsFor(roomId, room.timer_started_at))) {
       throw new HttpError(403, 'Chat time is up');
     }
 
@@ -20,9 +20,6 @@ export async function POST(req: Request, { params }: { params: { roomId: string 
       .select('id, room_id, sender_id, text, created_at, read_by')
       .single();
     if (error) throw error;
-    // Reaches the partner even with the app in the background or closed. A no-op unless push
-    // is configured, and it never throws: the message is already saved.
-    await notifyNewMessage(partnerId, me.display_name, roomId);
     return Response.json({ message: data });
   } catch (e) {
     return errorResponse(e);

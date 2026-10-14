@@ -49,10 +49,26 @@ export async function completeOnboarding(input: {
 
   const user = await currentUser();
   const defaultRealName = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.username || '';
-  const defaultEmail = user?.primaryEmailAddress?.emailAddress ?? user?.emailAddresses[0]?.emailAddress ?? '';
+  const defaultEmail = user?.primaryEmailAddress?.emailAddress ?? user?.emailAddresses?.[0]?.emailAddress ?? '';
 
-  const realName = input.realName !== undefined ? input.realName.trim() : defaultRealName;
-  const email = input.email !== undefined ? input.email.trim() : defaultEmail;
+  // Prevent users from changing their real name or email after registration
+  const { data: existingUser } = await supabaseAdmin()
+    .from('users')
+    .select('real_name, email')
+    .eq('clerk_id', userId)
+    .maybeSingle();
+
+  const realName = (existingUser?.real_name && existingUser.real_name.trim() !== '')
+    ? existingUser.real_name
+    : input.realName !== undefined && input.realName.trim() !== ''
+      ? input.realName.trim()
+      : defaultRealName;
+
+  const email = (existingUser?.email && existingUser.email.trim() !== '')
+    ? existingUser.email
+    : input.email !== undefined && input.email.trim() !== ''
+      ? input.email.trim()
+      : defaultEmail;
 
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return { error: 'Please enter a valid email address.' };

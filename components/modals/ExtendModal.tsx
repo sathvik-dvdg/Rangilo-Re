@@ -17,14 +17,14 @@ export function ExtendModal({ open, onClose, onPay, busy, error }: { open: boole
   return (
     <BottomSheet open={open} onClose={onClose}>
       <Hourglass />
-      <h2 className="mt-3 font-display text-2xl text-paper">Keep the Connection Going</h2>
-      <p className="mt-1 text-sm text-paper/60">Get 2 more minutes of private chat.</p>
+      <h2 className="mt-3 font-display text-2xl text-paper">Unlock Unlimited Chat</h2>
+      <p className="mt-1 text-sm text-paper/60">Talk without limits and reveal their real identity.</p>
       <div className="mt-5 flex items-baseline gap-2">
         <span className="font-display text-4xl text-haldi">₹29</span>
       </div>
-      <Perks items={['+2 min added instantly', 'Chat history preserved']} />
+      <Perks items={['Unlimited time to talk', 'All messages stay saved', 'Real name & profile revealed']} />
       {error && <p className="mt-4 text-sm text-[#E58A7F]">{error}</p>}
-      <RazorpayButton busy={busy} onClick={onPay} label="Pay ₹29 with Razorpay" />
+      <RazorpayButton busy={busy} onClick={onPay} label="Unlock for ₹29 with Razorpay" />
     </BottomSheet>
   );
 }

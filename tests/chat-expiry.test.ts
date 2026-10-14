@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   insert: vi.fn(),
-  notifyNewMessage: vi.fn(async () => {}),
   timerStartedAt: null as string | null,
   extraSeconds: 0,
 }));
@@ -15,10 +14,10 @@ vi.mock('@/lib/supabaseAdmin', () => ({
     throw new Error('unexpected database access');
   },
 }));
-vi.mock('@/lib/push', () => ({ notifyNewMessage: mocks.notifyNewMessage }));
 vi.mock('@/lib/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/server')>()),
   extraSecondsFor: async () => mocks.extraSeconds,
+  getRevealed: async () => null,
   loadRoom: async () => ({
     me: { clerk_id: 'user_alice', display_name: 'DiyaDancer_Avni_4821' },
     partnerId: 'user_bob',
@@ -44,7 +43,6 @@ const send = () =>
 
 beforeEach(() => {
   mocks.insert.mockClear();
-  mocks.notifyNewMessage.mockClear();
   mocks.timerStartedAt = null;
   mocks.extraSeconds = 0;
 });
@@ -67,15 +65,6 @@ describe('POST /api/rooms/[roomId]/messages and chat expiry', () => {
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ error: 'Chat time is up' });
     expect(mocks.insert).not.toHaveBeenCalled();
-    expect(mocks.notifyNewMessage).not.toHaveBeenCalled();
-  });
-
-  // NOTIF-002: the partner is told who wrote and where, never what was written.
-  it('notifies the partner, by nickname and room only, once the message is saved', async () => {
-    expect((await send()).status).toBe(200);
-    expect(mocks.notifyNewMessage).toHaveBeenCalledTimes(1);
-    expect(mocks.notifyNewMessage).toHaveBeenCalledWith('user_bob', 'DiyaDancer_Avni_4821', 'user_alice_user_bob');
-    expect(JSON.stringify(mocks.notifyNewMessage.mock.calls)).not.toContain('hello');
   });
 
   it('honours granted extra time, then rejects again when that runs out', async () => {

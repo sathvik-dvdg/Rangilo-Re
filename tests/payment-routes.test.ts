@@ -713,12 +713,12 @@ describe('Paid Mode: paying to see a name and photo', () => {
     });
   });
 
-  it('paying for an extension never reveals anyone, even where a reveal has been allowed', async () => {
+  it('paying for an extension also reveals the partner (DEC-014)', async () => {
     ask('allowed');
     seedOrder(); // an ordinary extension order
     expect((await verify(post('/api/payment/verify', checkoutResponse()))).status).toBe(200);
     expect(writesTo('chat_extensions')).toHaveLength(1);
-    expect(writesTo('reveal_requests')).toEqual([]);
-    expect(requests[0]).toMatchObject({ status: 'allowed', payment_id: null });
+    expect(writesTo('reveal_requests')).toHaveLength(1);
+    expect(writesTo('reveal_requests')[0].row).toMatchObject({ status: 'revealed', payment_id: PAYMENT });
   });
 });

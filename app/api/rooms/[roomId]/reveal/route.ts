@@ -1,5 +1,4 @@
 import { billingDisabledResponse } from '@/lib/billing';
-import { notifyRevealRequest } from '@/lib/push';
 import { getRevealState, hasRealName, requestReveal, respondToReveal } from '@/lib/reveal';
 import { HttpError, errorResponse, loadRoom, requireUserId } from '@/lib/server';
 import { isRecord } from '@/lib/utils';
@@ -31,7 +30,7 @@ export async function POST(req: Request, { params }: { params: { roomId: string 
       if (disabled) return disabled;
     }
 
-    const { db, me, partnerId } = await loadRoom(roomId, userId);
+    const { db, partnerId } = await loadRoom(roomId, userId);
 
     if (action === 'request') {
       // Only once a real conversation exists: both of them have written something here.
@@ -40,7 +39,6 @@ export async function POST(req: Request, { params }: { params: { roomId: string 
       const spoke = new Set((senders ?? []).map((m) => m.sender_id as string));
       if (!spoke.has(userId) || !spoke.has(partnerId)) throw new HttpError(409, 'Say hi to each other first');
       await requestReveal(userId, partnerId);
-      await notifyRevealRequest(partnerId, me.display_name, roomId);
     } else if (action === 'allow') {
       if (!(await hasRealName(userId))) throw new HttpError(409, 'Add your real name to your profile first');
       if (!(await respondToReveal(userId, partnerId, true))) throw new HttpError(409, 'There is no request waiting for your answer');

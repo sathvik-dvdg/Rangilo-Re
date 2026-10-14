@@ -11,7 +11,6 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@clerk/nextjs/server', () => ({ auth: () => ({ userId: 'user_alice' }) }));
-vi.mock('@/lib/push', () => ({ notifyNewMessage: async () => {} }));
 vi.mock('@/lib/supabaseAdmin', () => ({
   supabaseAdmin: () => ({
     from: (table: string) => {
@@ -27,6 +26,7 @@ vi.mock('@/lib/supabaseAdmin', () => ({
 }));
 vi.mock('@/lib/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/server')>()),
+  getRevealed: async () => null,
   loadRoom: async () => ({
     me: { clerk_id: 'user_alice', display_name: 'DiyaDancer_Avni_4821' },
     partnerId: 'user_bob',

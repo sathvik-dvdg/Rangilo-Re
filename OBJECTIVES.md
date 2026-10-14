@@ -69,10 +69,10 @@ At baseline **no objective is Verified**: the repository has no test suite and n
 | Auth | `@clerk/nextjs` `^5.7.6` via `clerkMiddleware` |
 | Database / realtime | `@supabase/supabase-js` `^2.117.2`; Postgres + Realtime (postgres_changes + presence) |
 | Payments | `razorpay` `^2.9.8` server SDK + Checkout.js loaded from `checkout.razorpay.com` at click time |
-| Notifications | `web-push` `^3.6.7` (server; signs and encrypts Web Push messages) + `public/sw.js` service worker; added 2026-10-14 |
+| Notifications | None. The in-app notifier and Web Push (`web-push`, `public/sw.js`) were removed 2026-10-14 (DEC-013) |
 | Client state | Zustand 5 (`store/useAppStore.ts`) |
 | Lists | `react-window` (dashboard) |
-| Scripts | `dev`, `build`, `start`, `lint` (`next lint`), `typecheck` (`tsc --noEmit`), `test` (`vitest run`, added 2026-10-13). |
+| Scripts | `dev` (`next dev --turbo` since 2026-10-14; `dev:webpack` keeps the webpack dev server), `build`, `start`, `lint` (`next lint`), `typecheck` (`tsc --noEmit`), `test` (`vitest run`, added 2026-10-13). |
 | CI / deployment config | `.github/workflows/ci.yml` added 2026-10-13 (not yet run on GitHub). No deployment config (`vercel.json` etc.). README says "Push to Vercel" — hosting is *Information Required*. |
 
 ### 3.2 Request and data flow — Verified (source)
@@ -99,10 +99,9 @@ Razorpay ──► POST /api/webhooks/razorpay (signature-checked, no Clerk auth
 | `GET /api/users` | `requireUserId` | Up to 2000 other users, `PUBLIC_COLUMNS` = `clerk_id, display_name, gender, last_seen` |
 | `POST /api/me/heartbeat` | `requireUserId` | Updates own `is_online`, `last_seen` |
 | `GET /api/rooms/[roomId]` | `requireUserId` + `loadRoom` | Room state, last 500 messages, extensions, where each reveal request stands, and the partner's name and photo if they agreed and the caller paid |
-| `POST /api/rooms/[roomId]/messages` | same | Insert message; rejects after expiry; then sends the partner a Web Push notification if push is configured (`lib/push.ts`) |
+| `POST /api/rooms/[roomId]/messages` | same | Insert message; rejects after expiry |
 | `POST /api/rooms/[roomId]/reveal` | `requireUserId` + `loadRoom` | `request` to see the partner's name and photo, or `allow` / `decline` the partner's request; `request` and `allow` are refused with billing off |
 | `GET /api/reveals` | `requireUserId` | Real name and photo of the dancers who agreed to share with the caller and whose reveal the caller paid for |
-| `GET` / `POST` / `DELETE /api/push/subscribe` | `requireUserId` | Whether push is configured and its public key; store this browser's push subscription for the caller; remove the caller's subscription |
 | `/admin`, `/admin/users`, `/admin/rooms` (pages) | `requireAdmin` (Clerk public metadata `role: "admin"`; 404 otherwise) | Counts and audit log; dancer roster including real name and email (each view recorded); room list without message text |
 | `app/admin/actions.ts` `removeUser`, `removeRoom` | `requireAdmin` | Audit row first, then delete a dancer's profile, rooms and reveals (optionally banning the Clerk account), or delete one room |
 | `POST /api/rooms/[roomId]/read` | same | Read receipts |
@@ -111,7 +110,7 @@ Razorpay ──► POST /api/webhooks/razorpay (signature-checked, no Clerk auth
 | `POST /api/payment/verify` | `requireUserId` | HMAC check, ledger ownership check, payment fetched from Razorpay and checked (`captured`, order id, amount, currency), `fulfilOrder()`; returns `{ verified }` |
 | `POST /api/webhooks/razorpay` | Signature only | Skips an event id already in `webhook_events`; `payment.captured` → `fulfilOrder()`; `payment.failed` → ledger `failed`; then records the event id and outcome |
 
-### 3.4 Data model — Verified (source), `supabase/migrations/0001_init.sql`, `0002_payment_orders.sql`, `0003_fulfilment_failed_and_webhook_events.sql`, `0004_campus_branch.sql`, `0005_campus_vibe_outfit_instagram.sql`, `0006_push_subscriptions.sql`, `0007_admin_actions.sql`, `0008_reveal_requests.sql` (which also adds `payment_orders.product`, `extend` or `reveal`)
+### 3.4 Data model — Verified (source), `supabase/migrations/0001_init.sql`, `0002_payment_orders.sql`, `0003_fulfilment_failed_and_webhook_events.sql`, `0004_campus_branch.sql`, `0005_campus_vibe_outfit_instagram.sql`, `0006_push_subscriptions.sql` (table dropped again by `0009_drop_push_subscriptions.sql`), `0007_admin_actions.sql`, `0008_reveal_requests.sql` (which also adds `payment_orders.product`, `extend` or `reveal`)
 
 | Table | Key columns | RLS read policy | Client writes |
 |---|---|---|---|
@@ -123,14 +122,14 @@ Razorpay ──► POST /api/webhooks/razorpay (signature-checked, no Clerk auth
 | `chat_extensions` | `room_id` FK, `payment_id` unique, `extra_seconds` | room participants | none |
 | `payment_orders` (0002, added 2026-10-14) | `user_id`, `room_id` (no FK), `order_id` unique, `payment_id` unique, `status` (`created`/`paid`/`failed`/`fulfilment_failed`, the last added by 0003), `amount`, `currency` | none (service role only) | none |
 | `webhook_events` (0003, added 2026-10-14) | `event_id` primary key (Razorpay event id), `event`, `order_id`, `payment_id` (no FKs), `outcome`, `received_at` | none (service role only) | none |
-| `push_subscriptions` (0006, added 2026-10-14) | `user_id` FK → `users.clerk_id` (cascade delete), `endpoint` unique, `p256dh`, `auth`, `updated_at` | none (service role only) | none |
+| `push_subscriptions` (0006, added 2026-10-14; dropped by 0009 the same day, DEC-013) | `user_id` FK → `users.clerk_id` (cascade delete), `endpoint` unique, `p256dh`, `auth`, `updated_at`. No longer read or written by the app | none (service role only) | none |
 | `admin_actions` (0007, added 2026-10-14) | `admin_id`, `action` (`view_roster`/`remove_user`/`block_user`/`remove_room`), `target`, `created_at`; append-only | none (service role only) | none |
 
 Realtime publication: `messages`, `rooms`, `chat_extensions`. `webhook_events` records the webhook events handled in Paid Mode; there is no fuller payment-event audit table and no blocks/reports tables. Whether this migration is what is actually applied to any live database is *Information Required*; the README instructs pasting it into the SQL editor, so there is no migration-version tracking.
 
 ### 3.5 Environment variables — Verified (source), names only
 
-`.env.example` defines: `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, four `NEXT_PUBLIC_CLERK_*_URL` vars, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, `NEXT_PUBLIC_RAZORPAY_KEY_ID`. `.env` and `.env*.local` are gitignored. `BILLING_MODE` (added 2026-10-13, documented in `.env.example`) is read only by `lib/billing.ts`. `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and `VAPID_SUBJECT` (added 2026-10-14, optional, all server-only) are read only by `lib/push.ts`. The admin console needs no environment variable: admins are marked in Clerk (ADMIN-001).
+`.env.example` defines: `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, four `NEXT_PUBLIC_CLERK_*_URL` vars, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, `NEXT_PUBLIC_RAZORPAY_KEY_ID`. `.env` and `.env*.local` are gitignored. `BILLING_MODE` (added 2026-10-13, documented in `.env.example`) is read only by `lib/billing.ts`. `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and `VAPID_SUBJECT` (added and removed 2026-10-14, DEC-013) are no longer read by anything. The admin console needs no environment variable: admins are marked in Clerk (ADMIN-001).
 
 ---
 
@@ -459,7 +458,7 @@ Classification of what exists today. "Implemented — unverified" means the code
 #### NOTIF-001 — In-app new-message notifications
 - **Requirement (added 2026-10-14, maintainer instruction):** A signed-in user anywhere in the app is told when a message arrives in a chat they do not have open: a toast with the sender's nickname and the message, a short sound, a vibration, an unread count on that dancer's card and on the navbar, and a count in the tab title. It must use data the user is already allowed to read, and add no channel another user could listen on.
 - **Files:** `components/layout/MessageNotifier.tsx` (mounted in `app/(main)/layout.tsx`), `store/useAppStore.ts` (`unread`), `components/dashboard/Dashboard.tsx`, `components/layout/Navbar.tsx`, `components/chat/ChatRoom.tsx`.
-- **Status:** Implemented — unverified. Listens for `INSERT` on `messages` through Realtime postgres_changes, which row-level security limits to the user's own rooms; no broadcast channel was added (PRIV-005 is not made worse). Unread counts live in memory and reset on reload.
+- **Status:** Retired 2026-10-14 (DEC-013). `MessageNotifier.tsx`, the `unread` store and the unread badges were removed. Before removal: implemented — unverified, never run with two accounts.
 - **Depends on:** SEC-003 (the `messages` read policy is what scopes delivery).
 - **Acceptance:** With two accounts: B on the dashboard receives a toast when A sends, and none for a chat B has open; a third account receives nothing.
 - **Evidence:** Manual two-account run (not yet done); TEST-005 for the policy.
@@ -468,7 +467,7 @@ Classification of what exists today. "Implemented — unverified" means the code
 #### NOTIF-002 — Web Push notifications
 - **Requirement (added 2026-10-14, maintainer instruction to use a service worker):** A user who has turned notifications on in a browser is notified of a new message when the app is in the background or closed. Push is optional: with no `VAPID_*` variables the app behaves as before. The notification carries the sender's public nickname and the room to open, never the message text, real name or email. The server posts only to known push-service hosts. A subscription belongs to whoever is signed in on that browser, and is dropped on sign-out, on turning notifications off, and when the push service reports it gone.
 - **Files:** `lib/push.ts`, `app/api/push/subscribe/route.ts`, `app/api/rooms/[roomId]/messages/route.ts`, `public/sw.js`, `lib/pushClient.ts`, `components/dashboard/NotificationToggle.tsx`, `supabase/migrations/0006_push_subscriptions.sql`.
-- **Status:** Implemented — unverified. Route and library behaviour is covered by tests with the push library and database mocked; nothing has been sent through a real push service, and migration 0006 has not been applied by this change.
+- **Status:** Retired 2026-10-14 (DEC-013). `lib/push.ts`, `lib/pushClient.ts`, `/api/push/subscribe`, `public/sw.js`, `NotificationToggle.tsx`, `tests/push.test.ts` and the `web-push` dependency were removed; `0009_drop_push_subscriptions.sql` drops the table. Browsers that subscribed keep a now-idle service worker registration until the site data is cleared; nothing is sent to them.
 - **Depends on:** DATA-001 (migration 0006), SEC-001, SEC-002, SEC-004, PRIV-003; PRIV-004 for deletion (the foreign key cascades).
 - **Acceptance:** Tests: unauthenticated and malformed subscribe requests are refused; an endpoint outside the push services is refused and never posted to; a subscription is stored under the caller only; the payload has no message text; a 404/410 removes the subscription; a send failure never fails the message. Plus a two-device run: B, with the tab in the background, gets a system notification that opens the chat.
 - **Evidence:** `tests/push.test.ts` (38 tests), `tests/chat-expiry.test.ts` "notifies the partner, by nickname and room only…". Passed locally 2026-10-14; not yet run in CI. Two-device run: not yet done.
@@ -846,7 +845,7 @@ Razorpay onboarding and product eligibility are **unresolved**. The ability to c
 - **Risks:** Anyone with access to the Clerk dashboard or the Clerk secret key can make an admin. There is one role: every admin can do everything the console offers. Public metadata is readable in that user's own browser, so an admin's role is visible to that admin (not to other users).
 
 #### ADMIN-002 — Admin removal actions
-- **Requirement (DEC-011, 2026-10-14):** An admin can remove a dancer (profile, every room they are in with its messages and extensions, reveals involving them, push subscriptions), remove and block a dancer (the same, and the Clerk account is banned so they cannot sign in), and remove a single room. Payment ledger rows are never deleted (PRIV-004). An admin cannot remove their own account. Inputs are validated before use, and each action asks for confirmation in the UI.
+- **Requirement (DEC-011, 2026-10-14):** An admin can remove a dancer (profile, every room they are in with its messages and extensions, reveals involving them), remove and block a dancer (the same, and the Clerk account is banned so they cannot sign in), and remove a single room. Payment ledger rows are never deleted (PRIV-004). An admin cannot remove their own account. Inputs are validated before use, and each action asks for confirmation in the UI.
 - **Files:** `app/admin/actions.ts`, `app/admin/users/page.tsx`, `app/admin/rooms/page.tsx`, `components/admin/*`.
 - **Status:** Implemented — unverified. Tested with Clerk and the database mocked; nothing has been run against a real database or Clerk instance.
 - **Depends on:** ADMIN-001, ADMIN-003, SEC-004.
@@ -1042,6 +1041,8 @@ Known limitations of the Free Mode gate, tracked here so they are not mistaken f
 | **DEC-010** | Approved price and products (₹29 is a proposal) | Business decision after GATE-001/003 |
 | **DEC-012** | Paid name-and-photo reveal | **Decided 2026-10-14 (maintainer).** Asked to make a ₹29 payment reveal the matched dancer's name and photo, the maintainer was shown that this conflicted with DEC-002, ID-001, ID-002 and PRIV-001, and chose the "ask each time" model: the requester asks for free, the other dancer allows or declines, and only after an allow can the requester pay ₹29; a verified payment then shows the real name and account photo, in the chat and the dancer list. Email is never shared. Payment cannot create consent (ID-002 unchanged). Implemented as ID-001, ID-003, PAY-017. **Still open:** confirmation by the project owner (§18.2 rule 5 names the owner for PRIV-/ID- changes); refunds when consent is withdrawn before the payment lands (PAY-012, DEC-007); revoking after a reveal (ID-003); whether Razorpay permits this product (GATE-003) and the legal review (GATE-008); the landing page still advertises the old reveal (PRIV-006). |
 | **DEC-011** | Admin access to user data | **Decided 2026-10-14 (maintainer's written instruction: an admin window in which the admin "can remove the user room directly and have the full access"):** admins, marked by `role: "admin"` in Clerk public metadata (the maintainer's choice of mechanism, same day), may see real names and emails in the roster and may remove dancers and rooms; every roster view and removal is recorded (ADMIN-001…003; PRIV-001 admin exception). **Still open:** whether an admin may read the text of private chats (not built: the rooms list shows who and how many messages, never the text); who the admins are; whether the privacy notice (GATE-004) must say that operators can see identity data. |
+| **DEC-013** | Notifications | **Decided 2026-10-14 (maintainer):** remove the notification feature completely, reported as slowing the app down. Removed: the in-app notifier (toast, sound, vibration, tab-title and unread badges; NOTIF-001) and Web Push (service worker, subscribe route, `web-push`; NOTIF-002). Measured the same day: the notifier opened an extra app-wide Realtime subscription to `messages` and, for each incoming message, called `GET /api/rooms/[id]` (a full room load, about ten database and Clerk calls) just to read a nickname; the dashboard called `/api/push/subscribe` on every load; and with push configured, sending a message waited up to 2.5 s per subscribed browser before responding. The slow dev compile times in the same report had a separate cause (webpack dev compilation; see `dev` in §3.1 Scripts). New-message alerts outside an open chat no longer exist; read receipts inside the chat are unchanged. `0009_drop_push_subscriptions.sql` must be run by hand wherever 0006 was applied. |
+| **DEC-014** | Unlimited chat & real identity on ₹29 payment | **Decided 2026-10-14 (maintainer):** Paying ₹29 in the chat expiry overlay unlocks unlimited chat time (no time limit), preserves message history, and reveals the partner's real name and profile to the payer (overriding prior consent requirement for paid ₹29 unlocks, approved by user). |
 
 ### Information required
 
@@ -1096,8 +1097,8 @@ Status abbreviations: **V** Verified (scope in brackets, e.g. unit/route level) 
 | CHAT-005 | Reconnect resync | `useSupabaseRealtime.ts` | P | E2E/manual | Refetch on resubscribe | — |
 | CHAT-006 | Read receipts consistent | `read/route.ts` | P | review | Atomic append | — |
 | CHAT-007 | Rate limiting | — | M | TEST-003 | Choose mechanism | — |
-| NOTIF-001 | In-app message notifications | `MessageNotifier.tsx`, `useAppStore.ts` | IU | manual two-account run | Do the run; persist unread | SEC-003 |
-| NOTIF-002 | Web Push via service worker | `lib/push.ts`, `api/push/subscribe`, `public/sw.js`, `0006_push_subscriptions.sql` | IU | `tests/push.test.ts`, `tests/chat-expiry.test.ts` | Apply 0006, set `VAPID_*`, two-device run | DATA-001, CHAT-007, SAFE-001 |
+| NOTIF-001 | In-app message notifications | — (removed) | Retired | — | — | DEC-013 |
+| NOTIF-002 | Web Push via service worker | — (removed); `0009_drop_push_subscriptions.sql` | Retired | — | Run 0009 where 0006 was applied | DEC-013 |
 | PAY-001 | Mode-gated billing | payment routes, `ChatRoom.tsx` | P | `tests/payment-routes.test.ts` | Landing copy | FREE-003 |
 | PAY-002 | Server catalogue, amount+currency | `lib/room.ts:24`, `create-order`, `verify`, webhook | P | `tests/payment-routes.test.ts` (webhook and verify mismatch) | Catalogue; record anomalies | PAY-003 |
 | PAY-003 | Order/payment ledger | `0002_payment_orders.sql`, `0003_…webhook_events.sql`, `lib/payments.ts` | P | `tests/payment-routes.test.ts` | `fulfilled`/`refunded` states, full audit table, apply migrations | DATA-001 |
