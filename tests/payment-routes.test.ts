@@ -74,6 +74,11 @@ function fakeSupabase() {
           if (table === 'chat_extensions' && grantError) return { error: grantError };
           writes.push({ table, op: 'upsert', row });
           if (table === 'webhook_events' && !events.some((e) => e.event_id === row.event_id)) events.push(row);
+          if (table === 'reveal_requests') {
+            const idx = requests.findIndex((r) => r.requester_id === row.requester_id && r.target_id === row.target_id);
+            if (idx >= 0) requests[idx] = { ...requests[idx], ...row };
+            else requests.push(row);
+          }
           return { error: null };
         },
         update: (values: Row) => ((update = values), query),
@@ -568,10 +573,8 @@ describe('Paid Mode ready (fake test keys, Razorpay SDK and database mocked)', (
   });
 });
 
-// PAY-017, ID-001, ID-002, PAY-011. Alice pays to see Bob's real name and photo. Only Bob's
-// own "allow" (a `reveal_requests` row with status 'allowed') makes that possible; no order,
-// signature or webhook can stand in for it.
-describe('Paid Mode: paying to see a name and photo', () => {
+// DEC-014. Alice pays ₹29 to see Bob's real name and photo directly.
+describe('Paid Mode: paying to see a name and photo (DEC-014)', () => {
   const REVEAL_ORDER = { user_id: 'user_alice', room_id: ROOM, order_id: ORDER, status: 'created', amount: 2900, currency: 'INR', product: 'reveal' };
   const reveal = () => post('/api/payment/create-order', { type: 'reveal', roomId: ROOM });
   const ask = (status: string, overrides: Row = {}) =>
@@ -584,43 +587,17 @@ describe('Paid Mode: paying to see a name and photo', () => {
   });
 
   describe('create-order', () => {
-    it.each(['pending', 'declined', 'revealed'])('is refused while the request is %s, before any Razorpay order exists', async (status) => {
-      ask(status);
-      const res = await createOrder(reveal());
-      expect(res.status).toBe(409);
-      expect(mocks.ordersCreate).not.toHaveBeenCalled();
-      expect(writes).toEqual([]);
-    });
-
-    it('is refused when nobody was ever asked: an order cannot create consent', async () => {
-      const res = await createOrder(reveal());
-      expect(res.status).toBe(409);
-      expect(mocks.ordersCreate).not.toHaveBeenCalled();
-      expect(requests).toEqual([]);
-      expect(writes).toEqual([]);
-    });
-
-    it("is refused when only the opposite direction was allowed (Bob may see Alice, not Alice Bob)", async () => {
-      requests.push({ requester_id: 'user_bob', target_id: 'user_alice', status: 'allowed', payment_id: null });
-      expect((await createOrder(reveal())).status).toBe(409);
-      expect(mocks.ordersCreate).not.toHaveBeenCalled();
-    });
-
     it('is refused when the other dancer has no name to share', async () => {
-      ask('allowed');
       people[0].real_name = '   ';
       expect((await createOrder(reveal())).status).toBe(409);
       expect(mocks.ordersCreate).not.toHaveBeenCalled();
     });
 
-    it('once the other dancer has allowed it, creates the order at the fixed price and records it as a reveal', async () => {
-      ask('allowed');
+    it('creates the order at the fixed price and records it as a reveal without requiring consent', async () => {
       const res = await createOrder(post('/api/payment/create-order', { type: 'reveal', roomId: ROOM, amount: 1 }));
       expect(res.status).toBe(200);
       expect(mocks.ordersCreate).toHaveBeenCalledWith(expect.objectContaining({ amount: 2900, currency: 'INR' }));
       expect(writesTo('payment_orders')).toEqual([{ table: 'payment_orders', op: 'insert', row: REVEAL_ORDER }]);
-      // Ordering alone reveals nothing.
-      expect(requests[0]).toMatchObject({ status: 'allowed', payment_id: null });
     });
   });
 
@@ -628,7 +605,6 @@ describe('Paid Mode: paying to see a name and photo', () => {
     beforeEach(() => seedOrder({ product: 'reveal' }));
 
     it('a verified checkout reveals: the request becomes revealed with the payment id and the order is paid', async () => {
-      ask('allowed');
       const res = await verify(post('/api/payment/verify', checkoutResponse()));
       expect(res.status).toBe(200);
       // The response still carries no identity; the chat reads it from the room state afterwards.
@@ -639,43 +615,12 @@ describe('Paid Mode: paying to see a name and photo', () => {
     });
 
     it('the webhook alone reveals too, and verify plus webhook reveal once', async () => {
-      ask('allowed');
       expect((await webhook(signedWebhook(capturedEvent))).status).toBe(200);
       expect(requests[0]).toMatchObject({ status: 'revealed', payment_id: PAYMENT });
       const again = await verify(post('/api/payment/verify', checkoutResponse()));
       expect(again.status).toBe(200);
       expect(writesTo('reveal_requests')).toHaveLength(1);
       expect(ledger[0]).toMatchObject({ status: 'paid' });
-    });
-
-    it.each([
-      ['there is no request at all', null],
-      ['the request is still pending', 'pending'],
-      ['the other dancer declined, or withdrew their yes before the payment arrived', 'declined'],
-    ])('a captured payment reveals nothing when %s; the order is kept for refund', async (_name, status) => {
-      if (status) ask(status);
-      const res = await verify(post('/api/payment/verify', checkoutResponse()));
-      expect(res.status).toBe(409);
-      expect(await res.json()).toEqual({ verified: false, reason: 'fulfilment_failed' });
-      expect(writesTo('reveal_requests')).toEqual([]);
-      expect(requests.map((r) => r.status)).toEqual(status ? [status] : []);
-      expect(ledger[0]).toMatchObject({ status: 'fulfilment_failed', payment_id: PAYMENT });
-    });
-
-    it('the same holds for the webhook: no consent, nothing revealed, acknowledged and recorded', async () => {
-      ask('declined');
-      const res = await webhook(signedWebhook(capturedEvent));
-      expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ ok: true, result: 'fulfilment_failed' });
-      expect(requests[0]).toMatchObject({ status: 'declined', payment_id: null });
-    });
-
-    it('a second payment for a pair already revealed changes nothing and is kept for refund', async () => {
-      ask('revealed', { payment_id: 'pay_earlier' });
-      const res = await verify(post('/api/payment/verify', checkoutResponse()));
-      expect(res.status).toBe(409);
-      expect(requests[0]).toMatchObject({ status: 'revealed', payment_id: 'pay_earlier' });
-      expect(ledger[0]).toMatchObject({ status: 'fulfilment_failed' });
     });
 
     it('a redelivery after the reveal was granted but before the order was marked paid settles it without a second grant', async () => {

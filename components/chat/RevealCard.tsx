@@ -13,9 +13,9 @@ export function RevealCard({ identity, nickname, gender }: { identity: RevealedI
           <div className="mb-3 flex items-center gap-3.5 rounded-xl border border-haldi/40 bg-gradient-to-r from-haldi/15 via-ink-2 to-kumkum/15 px-4 py-3">
             <Avatar name={nickname} gender={gender} imageUrl={identity.image_url} size={52} />
             <div className="min-w-0">
-              <p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-haldi">Shared with you</p>
+              <p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-haldi">Real Identity Revealed</p>
               <p className="truncate font-display text-lg leading-tight text-paper">{identity.real_name || '—'}</p>
-              <p className="truncate text-xs text-paper/55">{nickname} agreed to share their name and photo</p>
+              <p className="truncate text-xs text-paper/55">Real name &amp; photo unlocked</p>
             </div>
           </div>
         </motion.div>

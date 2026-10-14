@@ -155,22 +155,39 @@ export async function hasRealName(userId: string): Promise<boolean> {
 }
 
 /**
- * Called by payment fulfilment only, after the payment is verified. Moves an
- * 'allowed' request to 'revealed'. 'no_consent' means the target's yes is not
- * there (never given, declined, withdrawn, or already used by another payment):
- * nothing is disclosed, whatever was paid.
+ * Called by payment fulfilment only, after the payment is verified (DEC-014).
+ * Directly records the reveal in reveal_requests and reveals tables.
  */
-export async function grantReveal(requesterId: string, targetId: string, paymentId: string): Promise<'granted' | 'already_granted' | 'no_consent'> {
-  const { data, error } = await supabaseAdmin()
-    .from('reveal_requests')
-    .update({ status: 'revealed', payment_id: paymentId, revealed_at: new Date().toISOString() })
-    .eq('requester_id', requesterId)
-    .eq('target_id', targetId)
-    .eq('status', 'allowed')
-    .select('id');
-  if (error) throw error;
-  if ((data ?? []).length > 0) return 'granted';
-  // A redelivery after a crash between this grant and marking the order paid.
+export async function grantReveal(requesterId: string, targetId: string, paymentId: string): Promise<'granted' | 'already_granted'> {
   const existing = await findRequest(requesterId, targetId);
-  return existing?.status === 'revealed' && existing.payment_id === paymentId ? 'already_granted' : 'no_consent';
+  if (existing?.status === 'revealed' && existing.payment_id === paymentId) {
+    return 'already_granted';
+  }
+  const { error } = await supabaseAdmin()
+    .from('reveal_requests')
+    .upsert(
+      {
+        requester_id: requesterId,
+        target_id: targetId,
+        status: 'revealed',
+        payment_id: paymentId,
+        revealed_at: new Date().toISOString(),
+      },
+      { onConflict: 'requester_id,target_id' },
+    );
+  if (error && !isMissingTable(error)) throw error;
+
+  try {
+    await supabaseAdmin().from('reveals').upsert(
+      {
+        payer_id: requesterId,
+        target_id: targetId,
+        payment_id: paymentId,
+        paid_at: new Date().toISOString(),
+      },
+      { onConflict: 'payer_id,target_id', ignoreDuplicates: true },
+    );
+  } catch {}
+
+  return 'granted';
 }

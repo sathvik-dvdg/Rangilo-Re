@@ -316,30 +316,15 @@ describe('the dancer list (listRevealed)', () => {
   });
 });
 
-describe('grantReveal (called by payment fulfilment only)', () => {
-  it('moves an allowed request to revealed, recording the payment', async () => {
-    seed('user_alice', 'user_bob', 'allowed');
+describe('grantReveal (called by payment fulfilment only, DEC-014)', () => {
+  it('records the reveal and payment directly', async () => {
     expect(await grantReveal('user_alice', 'user_bob', 'pay_1')).toBe('granted');
     expect(requests()[0]).toMatchObject({ status: 'revealed', payment_id: 'pay_1' });
   });
 
-  it.each([['no request', null], ['a pending request', 'pending'], ['a declined request', 'declined']])('grants nothing for %s', async (_name, status) => {
-    if (status) seed('user_alice', 'user_bob', status);
-    expect(await grantReveal('user_alice', 'user_bob', 'pay_1')).toBe('no_consent');
-    expect(requests().map((r) => r.status)).toEqual(status ? [status] : []);
-  });
-
-  it('is safe to repeat for the same payment, and refuses a different one', async () => {
-    seed('user_alice', 'user_bob', 'allowed');
+  it('is safe to repeat for the same payment', async () => {
     await grantReveal('user_alice', 'user_bob', 'pay_1');
     expect(await grantReveal('user_alice', 'user_bob', 'pay_1')).toBe('already_granted');
-    expect(await grantReveal('user_alice', 'user_bob', 'pay_2')).toBe('no_consent');
     expect(requests()[0]).toMatchObject({ status: 'revealed', payment_id: 'pay_1' });
-  });
-
-  it("an allowed request in the other direction does not count", async () => {
-    seed('user_bob', 'user_alice', 'allowed');
-    expect(await grantReveal('user_alice', 'user_bob', 'pay_1')).toBe('no_consent');
-    expect(requests()[0]).toMatchObject({ status: 'allowed', payment_id: null });
   });
 });

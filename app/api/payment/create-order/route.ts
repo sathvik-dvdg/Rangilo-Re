@@ -1,7 +1,7 @@
 import { billingDisabledResponse } from '@/lib/billing';
 import { recordOrder, type OrderNotes } from '@/lib/payments';
 import { razorpay } from '@/lib/razorpay';
-import { hasRealName, isRevealAllowed } from '@/lib/reveal';
+import { hasRealName } from '@/lib/reveal';
 import { PRICE_PAISE, partnerFromRoomId } from '@/lib/room';
 import { HttpError, errorResponse, requireUserId } from '@/lib/server';
 import { isRecord } from '@/lib/utils';
@@ -26,10 +26,8 @@ export async function POST(req: Request) {
     const partnerId = typeof roomId === 'string' ? partnerFromRoomId(roomId, userId) : null;
     if (typeof roomId !== 'string' || !partnerId) throw new HttpError(400, 'Unknown room');
 
-    // A reveal can be bought only after the other dancer has agreed, and only while that
-    // agreement stands. The buyer cannot create it, and neither can this route (ID-001, PAY-017).
+    // DEC-014: direct reveal without consent handshake.
     if (type === 'reveal') {
-      if (!(await isRevealAllowed(userId, partnerId))) throw new HttpError(409, 'They have not agreed to share their name and photo');
       if (!(await hasRealName(partnerId))) throw new HttpError(409, 'They have no name to share yet');
     }
 

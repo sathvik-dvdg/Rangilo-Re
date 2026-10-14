@@ -118,7 +118,7 @@ export async function settlePayment(order: PaymentOrder, paymentId: string): Pro
 
   const db = supabaseAdmin();
   if (order.product === 'reveal') {
-    if ((await grantReveal(order.user_id, partnerId, paymentId)) === 'no_consent') throw new FulfilmentError('consent_missing');
+    await grantReveal(order.user_id, partnerId, paymentId);
   } else {
     const grant = await db.from('chat_extensions').upsert(
       {

@@ -257,16 +257,17 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
             </div>
           </div>
           <RevealCard identity={revealed} nickname={partner.display_name} gender={partner.gender} />
-          {billingEnabled && (
+          {billingEnabled && !revealed && (
             <RevealPanel
               reveal={reveal}
               partnerName={firstName}
               me={{ name: me.display_name, gender: me.gender }}
               canAsk={bothSpoke}
-              busy={revealBusy}
-              error={revealError}
-              onRequest={() => void revealAction('request')}
-              onAnswer={(allow) => void revealAction(allow ? 'allow' : 'decline')}
+              isRevealed={Boolean(revealed)}
+              busy={busy || revealBusy}
+              error={payError || revealError}
+              onRequest={() => {}}
+              onAnswer={() => {}}
               onBuy={() => openSheet('reveal')}
             />
           )}
