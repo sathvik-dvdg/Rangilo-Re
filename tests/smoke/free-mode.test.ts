@@ -191,7 +191,7 @@ describe('control: the same render in Paid Mode does show payment UI', () => {
     vi.stubEnv('BILLING_MODE', 'paid');
     room.state = roomState(new Date(Date.now() - 60 * 60 * 1000).toISOString());
     const html = await renderChat();
-    expect(html).toMatch(/Reveal for ₹29/);
+    expect(html).toMatch(/>Reveal</);
     expect(html).toMatch(/Extend Chat ₹29/);
     // The offer is never a dead end: a visible way back sits next to it (not just the header icon's label).
     expect(html).toMatch(/>Back to dancers<\/a>/);
@@ -209,14 +209,28 @@ describe('control: the same render in Paid Mode does show payment UI', () => {
 
     room.state = withReveal({ outgoing: 'none', incoming: 'none', sharing: null });
     let html = await renderChat();
-    expect(html).toMatch(/Want to know who/);
-    expect(html).toMatch(/Reveal for ₹29/);
+    expect(html).toMatch(/Want to know who it really is\?/);
+    expect(html).toMatch(/>Reveal</);
 
     // Once revealed, the banner hides and RevealCard is displayed
     room.state = withReveal({ outgoing: 'none', incoming: 'none', sharing: null }, { real_name: 'Bob Sharma', image_url: null });
     html = await renderChat();
-    expect(html).not.toMatch(/Reveal for ₹29/);
+    expect(html).not.toMatch(/>Reveal</);
     expect(html).toContain('Bob Sharma');
     expect(html).toMatch(/Real Identity Revealed/);
+  });
+
+  it('in Paid Mode when 15 seconds remain, an urgency popup with "Get Unlimited Time" appears', async () => {
+    vi.stubEnv('BILLING_MODE', 'paid');
+    // FREE_CHAT_MS is 120_000 ms. Started 108 seconds ago => 12 seconds remaining
+    const startedAt = new Date(Date.now() - 108 * 1000).toISOString();
+    room.state = {
+      ...roomState(startedAt),
+      messages: bothSpoke(startedAt),
+    };
+    const html = await renderChat();
+    expect(html).toMatch(/Only 12 seconds remaining!/);
+    expect(html).toMatch(/The window will close and you might miss your chance for a partner/);
+    expect(html).toMatch(/Get Unlimited Time/);
   });
 });

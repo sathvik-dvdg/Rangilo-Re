@@ -12,6 +12,7 @@ import { RevealCard } from './RevealCard';
 import { RevealPanel } from './RevealPanel';
 import { RoomSidebar } from './RoomSidebar';
 import { TimerExpiredOverlay } from './TimerExpiredOverlay';
+import { UrgencyWarningModal } from './UrgencyWarningModal';
 import { ExtendModal } from '@/components/modals/ExtendModal';
 import { RevealModal } from '@/components/modals/RevealModal';
 import { Toast } from '@/components/ui/Toast';
@@ -41,6 +42,7 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
   const [sheet, setSheet] = useState<'extend' | 'reveal' | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [warningDismissed, setWarningDismissed] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLInputElement>(null);
 
@@ -52,6 +54,15 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
   const isExpired = isUnlocked ? false : timer.expired;
   // Free Mode has no extension, so a closed chat stays readable instead of blurring behind an overlay.
   const closedFree = isExpired && !billingEnabled;
+
+  const show15sWarning =
+    billingEnabled &&
+    !isUnlocked &&
+    timer.remaining !== null &&
+    timer.remaining <= 15000 &&
+    timer.remaining > 0 &&
+    !warningDismissed &&
+    sheet === null;
 
   const refresh = useCallback(async () => {
     const res = await fetch(`/api/rooms/${encodeURIComponent(roomId)}`);
@@ -268,7 +279,7 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
               error={payError || revealError}
               onRequest={() => {}}
               onAnswer={() => {}}
-              onBuy={() => openSheet('reveal')}
+              onBuy={() => void startPayment('reveal')}
             />
           )}
           <ChatTimer started={timer.started} remaining={timer.remaining} total={timer.total} fraction={timer.fraction} waitingFor={waitingFor} isUnlocked={isUnlocked} />
@@ -385,6 +396,13 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
 
       {billingEnabled && (
         <>
+          <UrgencyWarningModal
+            open={show15sWarning}
+            remainingMs={timer.remaining ?? 15000}
+            onClose={() => setWarningDismissed(true)}
+            onPay={() => void startPayment('extend')}
+            busy={busy}
+          />
           <ExtendModal open={sheet === 'extend'} onClose={() => setSheet(null)} onPay={() => void startPayment('extend')} busy={busy} error={payError} />
           <RevealModal open={sheet === 'reveal'} partnerName={firstName} onClose={() => setSheet(null)} onPay={() => void startPayment('reveal')} busy={busy} error={payError} />
         </>

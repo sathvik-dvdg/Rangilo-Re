@@ -33,16 +33,16 @@ export function RevealPanel({
       <div className="flex items-center justify-between gap-3 rounded-xl border border-haldi/35 bg-gradient-to-r from-haldi/10 via-ink-2/95 to-kumkum/10 p-3 text-xs text-paper/90 shadow-sm">
         <div className="min-w-0 flex-1 pr-1">
           <p className="text-xs leading-relaxed text-paper/85">
-            Want to know who <strong className="font-semibold text-haldi">{partnerName}</strong> really is? Pay a small fee to reveal them and connect with them.
+            Want to know who it really is?
           </p>
         </div>
         <button
           type="button"
           onClick={onBuy}
           disabled={busy}
-          className="shrink-0 rounded-lg border border-haldi bg-haldi px-3 py-1.5 text-xs font-bold text-ink shadow-sm transition-all hover:bg-haldi-dark hover:text-paper active:scale-95 disabled:opacity-50"
+          className="shrink-0 rounded-lg border border-haldi bg-haldi px-3.5 py-1.5 text-xs font-bold text-ink shadow-sm transition-all hover:bg-haldi-dark hover:text-paper active:scale-95 disabled:opacity-50"
         >
-          Reveal for ₹29 →
+          {busy ? 'Opening…' : 'Reveal'}
         </button>
       </div>
       {error && (
