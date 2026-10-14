@@ -1,14 +1,18 @@
 import 'server-only';
 import { clerkClient } from '@clerk/nextjs/server';
 import { supabaseAdmin } from './supabaseAdmin';
-import type { RevealState, RevealStatus, RevealedIdentity } from './types';
+import type { RevealStatus, RevealedIdentity } from './types';
 
 /**
- * Consent-based name and photo sharing (ID-001..003, PAY-017). One
- * `reveal_requests` row per ordered pair: the requester asks, the target
- * allows or declines, and only then can the requester pay. Every function uses
- * the service role client, so callers authorise first and pass ids they have
- * already checked (SEC-002).
+ * Name and photo reveals that were already agreed (ID-001, PAY-017). The flow
+ * that created them, a free ask that anyone could make, followed by the
+ * target's yes and a separate ₹29, was retired on 2026-10-14: only a paying
+ * user may request, through the connect payment (DEC-013). What remains reads
+ * reveals already granted, and lets fulfilment finish a reveal order that was
+ * created before then. Nothing here can create or allow a request.
+ *
+ * Every function uses the service role client, so callers authorise first and
+ * pass ids they have already checked (SEC-002).
  *
  * The old `reveals` table is never read here: rows in it were created by
  * payment alone, with no consent, so they disclose nothing (DEC-003).
@@ -60,15 +64,6 @@ export async function getRevealed(viewerId: string, targetId: string): Promise<R
   return { real_name, image_url };
 }
 
-/** Both directions between two dancers, for the chat. */
-export async function getRevealState(meId: string, partnerId: string): Promise<RevealState> {
-  const [outgoing, incoming] = await Promise.all([findRequest(meId, partnerId), findRequest(partnerId, meId)]);
-  // While deciding, the person asked sees exactly what they would be sharing (ID-003).
-  const sharing =
-    incoming?.status === 'pending' ? await Promise.all([realName(meId), profileImage(meId)]).then(([real_name, image_url]) => ({ real_name, image_url })) : null;
-  return { outgoing: outgoing?.status ?? 'none', incoming: incoming?.status ?? 'none', sharing };
-}
-
 const LIST_LIMIT = 100;
 
 /** Everyone whose name and photo this viewer may see, for the dancer list. */
@@ -96,41 +91,6 @@ export async function listRevealed(viewerId: string): Promise<({ clerk_id: strin
     real_name: typeof p.real_name === 'string' ? p.real_name.trim() : '',
     image_url: images.get(p.clerk_id as string) ?? null,
   }));
-}
-
-/** Asks. Does nothing if this requester has asked this target before, whatever the answer was. */
-export async function requestReveal(requesterId: string, targetId: string): Promise<void> {
-  const { error } = await supabaseAdmin()
-    .from('reveal_requests')
-    .upsert({ requester_id: requesterId, target_id: targetId }, { onConflict: 'requester_id,target_id', ignoreDuplicates: true });
-  if (error) throw error;
-}
-
-/**
- * The target's answer to the requester. Allowing needs a pending request;
- * declining also withdraws an earlier yes, as long as nothing has been paid.
- * Returns false when there was nothing to answer.
- */
-export async function respondToReveal(targetId: string, requesterId: string, allow: boolean): Promise<boolean> {
-  const { data, error } = await supabaseAdmin()
-    .from('reveal_requests')
-    .update({ status: allow ? 'allowed' : 'declined', responded_at: new Date().toISOString() })
-    .eq('requester_id', requesterId)
-    .eq('target_id', targetId)
-    .in('status', allow ? ['pending'] : ['pending', 'allowed'])
-    .select('id');
-  if (error) throw error;
-  return (data ?? []).length > 0;
-}
-
-/** True only while the target's yes stands and nothing has been paid yet. */
-export async function isRevealAllowed(requesterId: string, targetId: string): Promise<boolean> {
-  return (await findRequest(requesterId, targetId))?.status === 'allowed';
-}
-
-/** Whether the target has a real name to share. An empty one is not worth asking anyone to pay for. */
-export async function hasRealName(userId: string): Promise<boolean> {
-  return (await realName(userId)) !== '';
 }
 
 /**

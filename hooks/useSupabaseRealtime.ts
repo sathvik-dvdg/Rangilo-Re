@@ -13,7 +13,7 @@ type Handlers = {
   onConsentChange: () => void;
   /** The room became unlimited (it was paid for). */
   onUnlimited: () => void;
-  /** A request to see a name and photo was made or answered. Row-level security only delivers the user's own. */
+  /** A name-and-photo reveal changed: only a reveal paid for before that flow was retired can still be granted (DEC-013). Row-level security only delivers the user's own. */
   onRevealChange?: () => void;
 };
 
@@ -52,7 +52,8 @@ export function useRoomRealtime(roomId: string, userId: string | null, handlers:
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_extensions', filter: `room_id=eq.${roomId}` }, (p) =>
         h.current.onExtension((p.new as { extra_seconds: number }).extra_seconds),
       )
-      // RLS delivers reveal_requests only to the two dancers involved (reveal flow).
+      // RLS delivers reveal_requests only to the two dancers involved. Nothing new can be asked (DEC-013),
+      // but a reveal paid for before then is granted when its payment lands, and should appear at once.
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reveal_requests' }, () => h.current.onRevealChange?.())
       .on('presence', { event: 'sync' }, () => setPresentIds(Object.keys(channel.presenceState())))
       .subscribe(async (status) => {

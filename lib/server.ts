@@ -4,7 +4,7 @@ import { supabaseAdmin } from './supabaseAdmin';
 import { diagnoseDbError } from './dbDiagnosis';
 import { getRevealedContact, getRoomConsent, isMissingSchema } from './consent';
 import { FREE_CHAT_MS, effectiveExtraSeconds, partnerFromRoomId } from './room';
-import { getRevealState, getRevealed } from './reveal';
+import { getRevealed } from './reveal';
 import type { MyProfile, PublicProfile, RoomState } from './types';
 
 export const PUBLIC_COLUMNS = 'clerk_id, display_name, gender, last_seen';
@@ -151,7 +151,8 @@ export async function getRoomState(roomId: string, userId: string): Promise<Room
   const { db, me, partner, partnerId, room } = await loadRoom(roomId, userId);
   // `revealed` (contact flow) comes only from a contact_reveals row for this pair.
   // Rows in the old payer-only `reveals` table are no longer read or shown (DEC-003).
-  const [{ data: messages, error }, extraSeconds, consent, revealed, reveal] = await Promise.all([
+  // `sharedWithMe` is a name-and-photo reveal granted before that flow was retired (DEC-013).
+  const [{ data: messages, error }, extraSeconds, consent, revealed, sharedWithMe] = await Promise.all([
     db
       .from('messages')
       .select('id, room_id, sender_id, text, created_at, read_by')
@@ -161,7 +162,7 @@ export async function getRoomState(roomId: string, userId: string): Promise<Room
     extraSecondsFor(roomId, room.timer_started_at),
     getRoomConsent(roomId, userId),
     getRevealedContact(userId, partnerId),
-    getRevealState(userId, partnerId),
+    getRevealed(userId, partnerId),
   ]);
   if (error) throw error;
   return {
@@ -174,6 +175,6 @@ export async function getRoomState(roomId: string, userId: string): Promise<Room
     unlimited: room.unlimited,
     consent,
     revealed,
-    reveal,
+    sharedWithMe,
   };
 }

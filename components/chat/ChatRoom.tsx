@@ -10,11 +10,9 @@ import { ChatTimer } from './ChatTimer';
 import { ConsentBanner } from './ConsentBanner';
 import { MessageBubble } from './MessageBubble';
 import { RevealCard } from './RevealCard';
-import { RevealPanel } from './RevealPanel';
 import { RoomSidebar } from './RoomSidebar';
 import { TimerExpiredOverlay } from './TimerExpiredOverlay';
 import { ConnectModal } from '@/components/modals/ConnectModal';
-import { RevealModal } from '@/components/modals/RevealModal';
 import { Toast } from '@/components/ui/Toast';
 import { useRoomRealtime } from '@/hooks/useSupabaseRealtime';
 import { useChatTimer } from '@/hooks/useChatTimer';
@@ -39,15 +37,13 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
   const [consent, setConsent] = useState(initial.consent);
   // Contact-flow reveal (name + email): from contact_reveals row.
   const [revealed, setRevealed] = useState(initial.revealed);
-  // Reveal-request state (name + photo): from reveal_requests row.
-  const [reveal, setReveal] = useState(initial.reveal);
-  const [revealBusy, setRevealBusy] = useState(false);
-  const [revealError, setRevealError] = useState<string | null>(null);
+  // A name-and-photo reveal granted before only paying users could request (DEC-013).
+  const [sharedWithMe, setSharedWithMe] = useState(initial.sharedWithMe);
   const [answering, setAnswering] = useState(false);
   const [answerError, setAnswerError] = useState<string | null>(null);
 
   const [text, setText] = useState('');
-  const [sheet, setSheet] = useState<'connect' | 'reveal' | null>(null);
+  const [sheet, setSheet] = useState<'connect' | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
@@ -82,7 +78,7 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
     setUnlimited(s.unlimited);
     setConsent(s.consent);
     setRevealed(s.revealed);
-    setReveal(s.reveal);
+    setSharedWithMe(s.sharedWithMe);
   }, [roomId]);
 
   // Celebrate the moment contact details are exchanged (connect flow), on both screens.
@@ -91,26 +87,6 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
     if (revealed && !wasConnected.current) fireCelebration();
     wasConnected.current = revealed !== null;
   }, [revealed]);
-
-  // Ask to see my partner's name and photo, or answer their request to see mine (reveal flow, ID-001).
-  const revealAction = async (action: 'request' | 'allow' | 'decline') => {
-    setRevealBusy(true);
-    setRevealError(null);
-    try {
-      const res = await fetch(`/api/rooms/${encodeURIComponent(roomId)}/reveal`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action }),
-      });
-      const data = (await res.json().catch(() => ({}))) as { reveal?: RoomState['reveal']; error?: string };
-      if (res.ok && data.reveal) setReveal(data.reveal);
-      else setRevealError(data.error ?? 'That did not go through. Try again.');
-    } catch {
-      setRevealError('That did not go through. Check your connection.');
-    } finally {
-      setRevealBusy(false);
-    }
-  };
 
   const upsert = useCallback((m: Message) => {
     setMessages((prev) => {
@@ -218,20 +194,20 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
     });
   };
 
-  const startPayment = async (type: 'connect' | 'reveal') => {
+  const startPayment = async () => {
     if (!billingEnabled) return;
-    if (!(await pay(roomId, type))) return;
+    if (!(await pay(roomId))) return;
     setSheet(null);
     // Whatever was bought shows up only because the server now reports it (PAY-014).
     await refresh();
     fireCelebration();
-    if (type === 'connect') setToast('Chat unlocked. Request sent.');
-    else if (type === 'reveal') setToast('Name and photo shared with you');
+    setToast('Chat unlocked. Request sent.');
   };
 
-  const openSheet = (which: 'connect' | 'reveal') => {
+  // Paying is the only way to ask the partner for anything: no free request exists (DEC-013).
+  const openSheet = () => {
     clearError();
-    setSheet(which);
+    setSheet('connect');
   };
 
   const answer = async (action: 'accept' | 'decline') => {
@@ -311,29 +287,15 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
               </p>
             </div>
             {canOffer && !timer.expired && (
-              <Button variant="haldi" size="sm" className="shrink-0" onClick={() => openSheet('connect')}>
+              <Button variant="haldi" size="sm" className="shrink-0" onClick={openSheet}>
                 Connect ₹29
               </Button>
             )}
           </div>
-          {/* Contact-flow: shows the partner's real name + email once they've agreed. */}
-          <RevealCard identity={revealed} />
+          {/* The partner's real name + email once they agreed; otherwise a name-and-photo reveal granted earlier. */}
+          <RevealCard identity={revealed ?? sharedWithMe} nickname={partner.display_name} gender={partner.gender} />
           {/* Consent banner: shown to the partner when they have a pending connect request. */}
           <ConsentBanner consent={consent} partnerName={firstName} busy={answering} error={answerError} onAnswer={answer} />
-          {/* Reveal panel: request/answer to see the partner's name and photo (reveal flow). */}
-          {billingEnabled && (
-            <RevealPanel
-              reveal={reveal}
-              partnerName={firstName}
-              me={{ name: me.display_name, gender: me.gender }}
-              canAsk={bothSpoke}
-              busy={revealBusy}
-              error={revealError}
-              onRequest={() => void revealAction('request')}
-              onAnswer={(allow) => void revealAction(allow ? 'allow' : 'decline')}
-              onBuy={() => openSheet('reveal')}
-            />
-          )}
           <ChatTimer
             started={timer.started}
             remaining={timer.remaining}
@@ -388,7 +350,7 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
               <div ref={bottom} />
             </div>
           </div>
-          {canOffer && <TimerExpiredOverlay show={timer.expired && sheet === null} onConnect={() => openSheet('connect')} partnerName={firstName} />}
+          {canOffer && <TimerExpiredOverlay show={timer.expired && sheet === null} onConnect={openSheet} partnerName={firstName} />}
         </div>
 
         {closed ? (
@@ -456,10 +418,7 @@ export function ChatRoom({ initial, billingEnabled, renderedAt }: { initial: Roo
       />
 
       {billingEnabled && (
-        <>
-          <ConnectModal open={sheet === 'connect'} onClose={() => setSheet(null)} onPay={() => void startPayment('connect')} busy={busy} error={payError} partnerName={firstName} />
-          <RevealModal open={sheet === 'reveal'} partnerName={firstName} onClose={() => setSheet(null)} onPay={() => void startPayment('reveal')} busy={busy} error={payError} />
-        </>
+        <ConnectModal open={sheet === 'connect'} onClose={() => setSheet(null)} onPay={() => void startPayment()} busy={busy} error={payError} partnerName={firstName} />
       )}
       <Toast message={toast} onDone={() => setToast(null)} />
     </main>

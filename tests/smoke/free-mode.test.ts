@@ -67,7 +67,7 @@ function roomState(timerStartedAt: string | null): RoomState {
     unlimited: false,
     consent: NO_REQUEST,
     revealed: null,
-    reveal: { outgoing: 'none', incoming: 'none', sharing: null },
+    sharedWithMe: null,
   };
 }
 
@@ -141,19 +141,11 @@ describe('Free Mode smoke (in-process, providers mocked)', () => {
     expect(html).toContain('That is me'); // the thread itself is still rendered
   });
 
-  // Asking to see a name and photo is part of the paid feature, so none of it appears with billing off,
-  // whatever state a request is in.
-  it.each(['none', 'pending', 'allowed'] as const)('chat shows no name-and-photo request or offer (request state: %s)', async (state) => {
-    const now = new Date().toISOString();
-    room.state = {
-      ...roomState(now),
-      messages: bothSpoke(now),
-      reveal: { outgoing: state, incoming: state === 'none' ? 'none' : 'pending', sharing: state === 'none' ? null : { real_name: 'Avni Private', image_url: null } },
-    };
+  it('a name and photo shared before the free ask was retired still shows, with no payment UI', async () => {
+    room.state = { ...roomState(null), sharedWithMe: { real_name: 'Arjun Mehta', image_url: null } };
     const html = await renderChat();
-    expect(html).not.toMatch(/Ask to see name/i);
-    expect(html).not.toMatch(/is asking to see your real name/i);
-    expect(html).not.toContain('Avni Private');
+    expect(html).toContain('Arjun Mehta');
+    expect(html).toContain('Shared with you');
     for (const pattern of PAYMENT_UI) expect(html).not.toMatch(pattern);
   });
 
@@ -254,36 +246,12 @@ describe('control: the same render in Paid Mode does show payment UI', () => {
     }
   });
 
-  it('in Paid Mode a dancer can ask, and is offered the purchase only after the other dancer said yes', async () => {
+  it('in Paid Mode the only way to ask is to pay: no free request for a name and photo (DEC-013)', async () => {
     vi.stubEnv('BILLING_MODE', 'paid');
     const now = new Date().toISOString();
-    const withReveal = (reveal: RoomState['reveal']) => ({ ...roomState(now), messages: bothSpoke(now), reveal });
-
-    room.state = withReveal({ outgoing: 'none', incoming: 'none', sharing: null });
-    let html = await renderChat();
-    expect(html).toMatch(/Ask to see name &amp; photo/);
-    expect(html).not.toMatch(/See them ₹29/);
-
-    for (const outgoing of ['pending', 'declined'] as const) {
-      room.state = withReveal({ outgoing, incoming: 'none', sharing: null });
-      html = await renderChat();
-      expect(html).not.toMatch(/See them ₹29/);
-      expect(html).not.toMatch(/Ask to see name/);
-    }
-
-    room.state = withReveal({ outgoing: 'allowed', incoming: 'none', sharing: null });
-    expect(await renderChat()).toMatch(/See them ₹29/);
-  });
-
-  it('the dancer being asked sees what would be shared and can allow or decline', async () => {
-    vi.stubEnv('BILLING_MODE', 'paid');
-    const now = new Date().toISOString();
-    room.state = { ...roomState(now), messages: bothSpoke(now), reveal: { outgoing: 'none', incoming: 'pending', sharing: { real_name: 'Avni Private', image_url: null } } };
+    room.state = { ...roomState(now), messages: bothSpoke(now) };
     const html = await renderChat();
-    expect(html).toMatch(/is asking to see your real name and photo/);
-    expect(html).toContain('Avni Private');
-    expect(html).toMatch(/>Allow</);
-    expect(html).toMatch(/>Decline</);
-    expect(html).toMatch(/Your email is never shared/);
+    expect(html).toMatch(/Connect ₹29/);
+    expect(html).not.toMatch(/Ask to see name|You can ask|See them ₹29|is asking to see your/i);
   });
 });

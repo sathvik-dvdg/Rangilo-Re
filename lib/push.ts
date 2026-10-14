@@ -92,16 +92,6 @@ export async function sendPushToUser(userId: string, message: PushMessage): Prom
  * nickname and the room to open; never the message text, which would otherwise
  * sit on a lock screen.
  */
-/** Tells the recipient that someone is asking to see their name and photo, so they can answer in the chat. */
-export function notifyRevealRequest(recipientId: string, requesterDisplayName: string, roomId: string): Promise<void> {
-  return sendPushToUser(recipientId, {
-    title: 'GarbaConnect',
-    body: `${requesterDisplayName} is asking to see your name and photo`,
-    url: `/chat/${encodeURIComponent(roomId)}`,
-    tag: `${roomId}:reveal`,
-  });
-}
-
 export function notifyNewMessage(recipientId: string, senderDisplayName: string, roomId: string): Promise<void> {
   return sendPushToUser(recipientId, {
     title: 'GarbaConnect',

@@ -100,7 +100,7 @@ Razorpay ──► POST /api/webhooks/razorpay (signature-checked, no Clerk auth
 | `POST /api/me/heartbeat` | `requireUserId` | Updates own `is_online`, `last_seen` |
 | `GET /api/rooms/[roomId]` | `requireUserId` + `loadRoom` | Room state, last 500 messages, extensions, where each reveal request stands, and the partner's name and photo if they agreed and the caller paid |
 | `POST /api/rooms/[roomId]/messages` | same | Insert message; rejects after expiry; then sends the partner a Web Push notification if push is configured (`lib/push.ts`) |
-| `POST /api/rooms/[roomId]/reveal` | `requireUserId` + `loadRoom` | `request` to see the partner's name and photo, or `allow` / `decline` the partner's request; `request` and `allow` are refused with billing off |
+| ~~`POST /api/rooms/[roomId]/reveal`~~ | — | Removed 2026-10-14 (DEC-013): there is no free request; only a paying user may ask, through the connect payment |
 | `GET /api/reveals` | `requireUserId` | Real name and photo of the dancers who agreed to share with the caller and whose reveal the caller paid for |
 | `GET` / `POST` / `DELETE /api/push/subscribe` | `requireUserId` | Whether push is configured and its public key; store this browser's push subscription for the caller; remove the caller's subscription |
 | `/admin`, `/admin/users`, `/admin/rooms` (pages) | `requireAdmin` (Clerk public metadata `role: "admin"`; 404 otherwise) | Counts and audit log; dancer roster including real name and email (each view recorded); room list without message text |
@@ -320,8 +320,8 @@ Classification of what exists today. "Implemented — unverified" means the code
 #### FREE-006 — Identity sharing in Free Mode follows the consent model
 - **Requirement (DEC-002 decided 2026-10-13; revised by DEC-012 on 2026-10-14):** Free Mode offers no way to ask for, agree to or buy anyone's identity. A reveal already granted under ID-001 stays visible if the mode is switched off. The free, mutual exchange of ID-004 is not built.
 - **Why:** Identity sharing is a safety feature first; it must not be gated by payment.
-- **Files:** `app/api/rooms/[roomId]/reveal/route.ts` (refuses `request` and `allow` with billing off), `components/chat/ChatRoom.tsx` (reveal controls render only in Paid Mode).
-- **Status:** Implemented for reveal flow (refuses `request` and `allow` in Free Mode, `tests/reveal.test.ts`, `tests/smoke/free-mode.test.ts`); free contact exchange is retired under DEC-002, existing only as the paid connect request with partner acceptance (ID-001). One Free Mode behaviour remains: a request paid for while Paid Mode was on can still be answered after a rollback (FREE-007).
+- **Files:** `app/api/payment/create-order/route.ts` (the only way to ask; refused with billing off), `components/chat/ChatRoom.tsx`.
+- **Status:** Implemented. Since 2026-10-14 (DEC-013) there is no free request of any kind; asking means paying for `connect`, which is refused with billing off (`tests/smoke/free-mode.test.ts`, `tests/payment-routes.test.ts`). A name and photo shared before then still shows in either mode.
 - **Depends on:** ID-001…ID-004.
 - **Acceptance:** See ID-001.
 - **Evidence:** See ID-001.
@@ -624,8 +624,8 @@ Everything in this section is **inactive until Paid Mode is effective** (CFG-002
 
 #### PAY-016 — Pre-checkout disclosure
 - **Requirement:** Before checkout, show the product, price, what exactly is delivered, the refund policy, and links to Terms/Privacy.
-- **Files:** `components/modals/ConnectModal.tsx`, `components/modals/RevealModal.tsx`, `components/chat/TimerExpiredOverlay.tsx`.
-- **Status:** Partial. Since 2026-10-14 the connect sheet (`ConnectModal`) states the price, that the chat opens with no time limit as soon as the buyer pays, that the partner is asked to share contact details and nothing is shared unless they accept, that the buyer's own name and email are shared too, and that a decline or 24 hours of silence leaves the chat open with no refund; it links to `/refund-policy` in a new tab above the pay button. The reveal sheet (`RevealModal.tsx`, rebuilt 2026-10-14 for DEC-012) states what is and is not included (name/photo only, never email), and what happens if consent is withdrawn before the payment lands. No Terms or Privacy links; copy review pending.
+- **Files:** `components/modals/ConnectModal.tsx`, `components/chat/TimerExpiredOverlay.tsx` (`RevealModal.tsx` removed 2026-10-14, DEC-013).
+- **Status:** Partial. Since 2026-10-14 the connect sheet (`ConnectModal`) states the price, that the chat opens with no time limit as soon as the buyer pays, that the partner is asked to share contact details and nothing is shared unless they accept, that the buyer's own name and email are shared too, and that a decline or 24 hours of silence leaves the chat open with no refund; it links to `/refund-policy` in a new tab above the pay button. The reveal sheet (`RevealModal.tsx`, rebuilt 2026-10-14 for DEC-012) states what is and is not included (name/photo only, never email), and what happens if consent is withdrawn before the payment lands. No Terms or Privacy links; copy review pending. 2026-10-14: the sheet also links to the Terms of Service and the Privacy Policy, each in a new tab (`tests/legal-pages.test.ts`).
 - **Depends on:** GATE-004, DEC-007.
 - **Acceptance:** Disclosure copy reviewed against GATE-004 policies.
 - **Evidence:** Screenshot + review record.
@@ -634,10 +634,10 @@ Everything in this section is **inactive until Paid Mode is effective** (CFG-002
 #### PAY-017 — A paid reveal needs the other dancer's prior agreement
 - **Requirement (DEC-012, 2026-10-14):** The ₹29 reveal product shows the buyer the other dancer's real name and account photo, and nothing else (never an email). It can be ordered only while that dancer's request row is `allowed`, and it is granted only if the row is still `allowed` when the verified payment arrives (PAY-011). The product an order buys is fixed on the ledger when the order is created. A reveal order adds no chat time, and an extension order never reveals anyone.
 - **Files:** `app/api/payment/create-order/route.ts`, `lib/payments.ts` (`settlePayment`, `recordOrder`), `lib/reveal.ts`, `0008_reveal_requests.sql` (`payment_orders.product`).
-- **Status:** Verified (unit). Not run against a real database or Razorpay test mode. Migration 0008 has not been applied by this change; without it extension payments still work (an order row with no `product` is an extension) and reveal orders cannot be created.
+- **Status:** Retired for new orders 2026-10-14 (DEC-013): `create-order` refuses `reveal` (`tests/payment-routes.test.ts`). The fulfilment half still applies to a reveal order created before then and remains Verified (unit, mocked database): granted only if the earlier `allowed` row still stands. Not run against a real database or Razorpay test mode.
 - **Depends on:** ID-001, ID-002, PAY-003, PAY-008, PAY-010, DATA-001.
 - **Acceptance:** Tests: order refused for no request, pending, declined, already revealed, the opposite direction, or an empty name; allowed → order recorded as `reveal` at the server price; verify and webhook each reveal, and together reveal once; consent gone at payment time → nothing revealed, order `fulfilment_failed`; a second payment for the same pair reveals nothing more; forged, uncaptured, foreign-user and billing-off payments reveal nothing.
-- **Evidence:** `tests/payment-routes.test.ts` "Paid Mode: paying to see a name and photo" (20 tests). Passed locally 2026-10-14; not yet run in CI.
+- **Evidence:** `tests/payment-routes.test.ts` "Paid Mode: a name-and-photo order from before it was retired" (create-order refused in every request state; fulfilment cases unchanged). Passed locally 2026-10-14; not yet run in CI.
 - **Risks:** No refund path for a `fulfilment_failed` reveal order (PAY-012, DEC-007). Razorpay's permission for this product is not established (GATE-003), and the legal review covers it (GATE-008).
 
 #### PAY-018 — A paid extension delivers its full time
@@ -660,7 +660,7 @@ Razorpay onboarding and product eligibility are **unresolved**. The ability to c
 | **GATE-001** | Written confirmation from Razorpay that the actual product (social discovery / partner-finding at events, with the specific paid features) is an eligible business category for this merchant account | Email/ticket from Razorpay, filed with the project owner | Information Required |
 | **GATE-002** | Merchant onboarding and KYC approved; live mode activated | Razorpay dashboard activation status | Information Required |
 | **GATE-003** | Each paid product (extension; any identity-related product) confirmed as a permitted use case | Same as GATE-001, per product | Information Required |
-| **GATE-004** | Terms of Service, Privacy Policy, Refund & Cancellation Policy, Contact details, and digital-delivery description published on the site and linked from checkout | Live URLs; legal review | Partial. Since 2026-10-14 a Refund Policy page with the support contact and a digital-delivery description exists at `/refund-policy` (`app/(main)/refund-policy/page.tsx`), public and linked from the landing footer and from the checkout sheet (PAY-016). Its product description matches the code since the connect request was built later that day. Still missing: Terms of Service, Privacy Policy, cancellation terms, a live URL and legal review |
+| **GATE-004** | Terms of Service, Privacy Policy, Refund & Cancellation Policy, Contact details, and digital-delivery description published on the site and linked from checkout | Live URLs; legal review | Partial. Since 2026-10-14 a Refund Policy page with the support contact and a digital-delivery description exists at `/refund-policy` (`app/(main)/refund-policy/page.tsx`), public and linked from the landing footer and from the checkout sheet (PAY-016). Its product description matches the code since the connect request was built later that day. Still missing: Terms of Service, Privacy Policy, cancellation terms, a live URL and legal review 2026-10-14: Terms of Service (`/terms`) and Privacy Policy (`/privacy`) published in the app on a shared layout with the Refund Policy, linked from the footer and from the checkout sheet (`tests/legal-pages.test.ts`). Still missing: cancellation terms, live URLs, and the legal review (GATE-008). |
 | **GATE-005** | Live credentials stored only in the production environment; webhook configured for required events with its own secret; test keys elsewhere | Environment audit (names only), webhook config screenshot | Information Required |
 | **GATE-006** | Payment security and flow testing complete: TEST-004 passing in CI, plus a recorded end-to-end run in Razorpay test mode covering success, failure, cancel, duplicate, refund | CI run + test record | Missing |
 | **GATE-007** | Monitoring and incident handling: OPS-001…OPS-005 in place; an owner on call during launch | Runbook + alert test | Missing |
@@ -738,7 +738,7 @@ Razorpay onboarding and product eligibility are **unresolved**. The ability to c
 #### PRIV-004 — Account deletion and retention
 - **Requirement:** Users can delete their account; deletion removes or anonymises their profile and identity data; Clerk `user.deleted` is propagated; retention periods for messages and profiles after the season are defined (DEC-006). Payment ledger records are retained as legally required, minimised to what is needed.
 - **Files:** none.
-- **Status:** Missing.
+- **Status:** Missing. 2026-10-14: the Privacy Policy promises deletion on an emailed request. Known gap: `removeUser` (`app/admin/actions.ts`) deletes the dancer's rooms first, and a room with a `contact_consents` or `contact_reveals` row cannot be deleted (foreign keys without cascade, migration 0006), so for such a dancer the rooms and messages stay; the Clerk account is also not deleted unless the admin blocks. Needs a decision on what happens to consent rows tied to payment records.
 - **Depends on:** DEC-006, GATE-008.
 - **Acceptance:** Deleting a test user removes them from discovery and nulls identity fields within the stated time.
 - **Evidence:** Integration test.
@@ -769,7 +769,7 @@ Razorpay onboarding and product eligibility are **unresolved**. The ability to c
 #### ID-001 — Disclosure only with the disclosed person's explicit consent
 - **Requirement:** A participant's identity/contact details are shown to another participant only after the disclosed person explicitly, specifically, and freely consents to share *those fields* with *that participant*. The request and the consent are separate actions by different people. Default is no sharing.
 - **Why:** Core safety and privacy commitment; likely a legal requirement (GATE-008).
-- **Files:** `lib/consent.ts`, `app/api/rooms/[roomId]/consent/route.ts`, `components/chat/ConsentBanner.tsx`, `components/chat/RevealCard.tsx`, `0006_contact_consent.sql`; `lib/reveal.ts`, `app/api/rooms/[roomId]/reveal/route.ts`, `components/chat/RevealPanel.tsx`, `0008_reveal_requests.sql`.
+- **Files:** `lib/consent.ts`, `app/api/rooms/[roomId]/consent/route.ts`, `components/chat/ConsentBanner.tsx`, `components/chat/RevealCard.tsx`, `0006_contact_consent.sql`; `lib/reveal.ts` (read-only since DEC-013), `components/chat/RevealPanel.tsx`, `0008_reveal_requests.sql`.
 - **Status:** Verified (unit, mocked database). Both flows enforce explicit consent:
   - **Connect Flow (DEC-002):** A request (`contact_consents`, created only by payment) and consent (partner's answer via `accept_contact_consent`) are separate actions by different people. Acceptance discloses real name and email to the pair.
   - **Reveal Flow (DEC-012):** One `reveal_requests` row per ordered pair: requester asks for free, only the partner can allow or decline, and requester sees partner's name and photo only once allowed and completed by verified payment. Email is never shared.
@@ -790,7 +790,7 @@ Razorpay onboarding and product eligibility are **unresolved**. The ability to c
 
 #### ID-003 — Informed, scoped, revocable consent
 - **Requirement:** The consent screen states exactly which fields, to whom, and that it cannot be un-seen once shown; the user can choose what to share (e.g. a contact handle instead of email); future access can be revoked; consent events are recorded.
-- **Files:** `components/chat/ConsentBanner.tsx`, `components/chat/RevealPanel.tsx`, `lib/reveal.ts`, `0006_contact_consent.sql`, `0008_reveal_requests.sql`.
+- **Files:** `components/chat/ConsentBanner.tsx`, `lib/reveal.ts`, `0006_contact_consent.sql`, `0008_reveal_requests.sql`.
 - **Status:** Partial. The connect banner states fields (real name and email) and timestamps are recorded. The reveal panel states who is asking, exactly what would be shared (real name and photo), that email is not shared, and allows or declines. Gaps: no field-level picking, and revocation after reveal not yet implemented.
 - **Depends on:** DEC-002, DEC-012.
 - **Acceptance:** UX review + data model holds field-level consent with timestamps.
@@ -830,7 +830,7 @@ Razorpay onboarding and product eligibility are **unresolved**. The ability to c
 #### SAFE-003 — Age safeguards
 - **Requirement (DEC-005 decided 2026-10-13):** GarbaConnect is 18+ only. Onboarding requires an explicit self-declaration that the user is 18 or older, with a clear statement of the policy; the server rejects onboarding without it and records the declaration time. No date of birth is collected. The policy is subject to confirmation by the GATE-008 legal review.
 - **Files:** `components/dashboard/OnboardingModal.tsx`, `app/(main)/dashboard/actions.ts` (`completeOnboarding`); new column via migration (DATA-001).
-- **Status:** Missing.
+- **Status:** Missing. 2026-10-14: the Terms of Service state the 18+ rule; onboarding still does not ask for the declaration.
 - **Depends on:** DATA-001; GATE-008 confirmation.
 - **Acceptance:** Calling `completeOnboarding` without the declaration fails server-side; the UI cannot proceed without it; Terms state the 18+ policy.
 - **Evidence:** TEST-007; legal sign-off.
@@ -1042,15 +1042,16 @@ Known limitations of the Free Mode gate, tracked here so they are not mistaken f
 | **DEC-001** | Free Mode chat expiry | **Decided 2026-10-13 (project owner):** free mutual extension, both must agree, +2 min (FREE-005). Still open: cap on free extensions per room; whether "both present" stays a timer-start condition (CHAT-003). |
 | **DEC-002** | Identity-sharing model | **Decided 2026-10-13 (project owner):** free, mutual, opt-in, field-level choice; never paid (FREE-006, ID-004). **Revised 2026-10-14 (user instruction):** paid connect flow for ₹29 unlocks unlimited chat and requests mutual contact exchange (real name and email); partner acceptance required. Superceded "never paid". Does not relax consent (ID-001, ID-002). **DEC-012 (2026-10-14):** one-way name-and-photo reveal for ₹29 after recipient allows. Both flows coexist. |
 | **DEC-003** | Treatment of existing `reveals` rows created without consent | **Decided 2026-10-14 (user instruction), display half:** stop displaying them and leave the table untouched. No code reads the legacy `reveals` table. Still open: whether any **live** payments were taken for them, refunds if so, and whether to delete rows. |
-| **DEC-004** | Extension rules: who may buy, before/after timer start, how many, does the partner need to agree | Connect flow: one payment per room unlocks unlimited chat. Paid extensions: delivery measured from when paid (PAY-018). |
+| **DEC-004** | Extension rules: who may buy, before/after timer start, how many, does the partner need to agree | Connect flow: one payment per room unlocks unlimited chat. Paid extensions: delivery measured from when paid (PAY-018). 2026-10-14 (DEC-013): the paid extension is retired again; `create-order` sells `connect` only (it had been re-enabled by the merge of PR #9). |
 | **DEC-005** | Age policy | **Decided 2026-10-13 (project owner):** 18+ only, self-declaration at onboarding, no date of birth collected (SAFE-003). Subject to GATE-008 confirmation. |
-| **DEC-006** | Retention periods for messages, profiles and reports after the season | — |
+| **DEC-006** | Retention periods for messages, profiles and reports after the season | — **Decided 2026-10-14 (user instruction, published in the Privacy Policy):** profiles and messages are kept while the account is active and deleted on an emailed request; payment records are kept for accounting. Not yet true for everyone: the admin removal fails for a dancer with a connect request (see PRIV-004). |
 | **DEC-007** | Refund policy | **Decided 2026-10-14 (maintainer instruction):** no refunds once the paid chat extension has been delivered (digital, instant delivery); a full refund when a payment was deducted but the extension was not granted, on an email to `teamgarbaconnect@gmail.com` within 48 hours; payments are one-time, with no recurring charges. Published at `/refund-policy`. Revised later that day with the product (DEC-002): a full refund, made by the team within 48 hours without the buyer asking, when the partner declines or does not answer within 24 hours; no refund once the partner has accepted; a full refund on an email within 48 hours when the payment was taken but the request was not sent or accepted details were not shown; one-time payments only. The page and the checkout sheet state the same terms (`tests/refund-policy.test.ts`). Refunds are manual: orders in `refund_due` or `fulfilment_failed` (migration 0006 has the query). Not legally reviewed (GATE-004, GATE-008). Still open: recording a completed refund automatically (`refund.processed`, PAY-009). **Revised again 2026-10-14 (user instruction), superseding the terms above:** no refund once the unlimited chat is unlocked, including when the partner declines to share contact details or does not answer within 24 hours; a full refund, on an email within 48 hours, only when payment was deducted but the chat did not unlock. The page, the checkout sheet and the expiry overlay state this (`tests/refund-policy.test.ts`, `tests/smoke/free-mode.test.ts`). The refund queue is `payment_orders` in `fulfilment_failed`; there is no `refund_due` state any more. |
 | **DEC-008** | Landing stats and testimonials: replace with real data or remove | — |
 | **DEC-009** | Discovery scope: global list vs event-scoped; exposure of `last_seen`; gender filter | — |
 | **DEC-010** | Approved price and products (₹29 is a proposal) | Business decision after GATE-001/003. Products: ₹29 Connect (unlimited chat + mutual contact consent), ₹29 Reveal (name and photo reveal upon recipient allow). |
 | **DEC-011** | Admin access to user data | **Decided 2026-10-14 (maintainer instruction):** admins marked by `role: "admin"` in Clerk public metadata may see real names and emails in the roster and remove dancers and rooms; every view and action is audited (`ADMIN-001..003`). |
-| **DEC-012** | Paid name-and-photo reveal | **Decided 2026-10-14 (maintainer):** requester asks for free, partner allows or declines, and only after an allow can requester pay ₹29 to see name and photo. Email is never shared. (`PAY-017`, `ID-001`). |
+| **DEC-012** | Paid name-and-photo reveal | **Decided 2026-10-14 (maintainer):** requester asks for free, partner allows or declines, and only after an allow can requester pay ₹29 to see name and photo. Email is never shared. (`PAY-017`, `ID-001`). **Superseded 2026-10-14 by DEC-013:** no new request, allow or purchase is possible. |
+| **DEC-013** | Who may request identity | **Decided 2026-10-14 (user instruction):** only a paying user may request. The ₹29 connect payment is the only way to ask the other dancer for anything: it unlocks unlimited chat and sends the request for real name and email (DEC-002). Removed the same day: the free "Ask to see name & photo" request, the partner's allow/decline for it, the separate ₹29 name-and-photo purchase (`POST /api/rooms/[roomId]/reveal`, `RevealPanel`, `RevealModal`, `notifyRevealRequest`), and `create-order` now refuses `reveal` and `extend`. Kept: reveals already granted still show (chat `sharedWithMe`, dancer list), and a `reveal` or `extend` order created before the change is still fulfilled if its payment lands. `reveal_requests` is left untouched. Supersedes DEC-012 for anything new. |
 
 ### Information required
 
@@ -1090,7 +1091,7 @@ Status abbreviations: **V** Verified (scope in brackets, e.g. unit/route level) 
 | FREE-003 | No paid UI/claims | chat (done), landing (partly) | P | smoke (chat); `tests/refund-policy.test.ts` (`FeaturesReveal`) | `StatsCounter`, `Testimonials`, `ClosingCta` copy; policy-page rule | DEC-008, PRIV-006 |
 | FREE-004 | Billing endpoints inert; webhook grants only verified paid-era ledger orders | `app/api/payment/*`, webhook | P | `tests/payment-routes.test.ts`, smoke | Continuity path after ledger (FU-001) | PAY-003/006/011 |
 | FREE-005 | Free mutual +2 min extension at expiry | `ChatRoom.tsx` (interim closed panel) | M | smoke + `tests/chat-expiry.test.ts` (closed state only) | Build mutual-agreement flow | DATA-001; cap open |
-| FREE-006 | No identity sharing offered in Free Mode; free exchange unbuilt | `api/rooms/[roomId]/reveal`, `ChatRoom.tsx` | IU / Retired | `tests/reveal.test.ts`, smoke | Reveal flow gated to Paid Mode; free contact exchange retired | DEC-002, DEC-012 |
+| FREE-006 | No identity sharing offered in Free Mode; free exchange unbuilt | `create-order`, `ChatRoom.tsx` | IU / Retired | `tests/reveal.test.ts`, smoke | Reveal flow gated to Paid Mode; free contact exchange retired | DEC-002, DEC-012 |
 | FREE-007 | Non-destructive switching | `extraSecondsFor`, `lib/consent.ts`, consent route | IU | `tests/smoke/free-mode.test.ts` (render only) | Mode-flip integration test | DEC-003 |
 | FREE-008 | Config ≠ approval | process | M | change record | Adopt §20 | GATE-* |
 | AUTH-001 | Auth on all surfaces | `middleware.ts`, `requireUserId` | IU | TEST-003 | Route-table test | — |
@@ -1122,11 +1123,11 @@ Status abbreviations: **V** Verified (scope in brackets, e.g. unit/route level) 
 | PAY-013 | Reconciliation | — | M | report | Script | PAY-003 |
 | PAY-014 | Client never grants | `useRazorpay.ts`, `ChatRoom.tsx` | IU | TEST-004 | Write tests | — |
 | PAY-015 | Replay protection | `verify/route.ts`, ledger | V (unit) | `tests/payment-routes.test.ts` | Run in CI | PAY-003 |
-| PAY-016 | Pre-checkout disclosure | `ConnectModal.tsx`, `RevealModal.tsx`, `TimerExpiredOverlay.tsx` | P | `tests/refund-policy.test.ts`; review outstanding | Terms/Privacy links; copy review | GATE-004 |
-| PAY-017 | Paid reveal needs prior agreement | `create-order/route.ts`, `lib/payments.ts`, `lib/reveal.ts`, `0008_reveal_requests.sql` | V (unit) | `tests/payment-routes.test.ts` | Apply 0008; Razorpay test-mode run; refunds | ID-001/002, PAY-012, GATE-003 |
+| PAY-016 | Pre-checkout disclosure | `ConnectModal.tsx`, `TimerExpiredOverlay.tsx` | P | `tests/refund-policy.test.ts`; review outstanding | Terms/Privacy links; copy review | GATE-004 Terms/Privacy links added 2026-10-14. |
+| PAY-017 | Paid reveal needs prior agreement | `create-order/route.ts`, `lib/payments.ts`, `lib/reveal.ts`, `0008_reveal_requests.sql` | V (unit) | `tests/payment-routes.test.ts` | Apply 0008; Razorpay test-mode run; refunds | ID-001/002, PAY-012, GATE-003 Retired for new orders (DEC-013); fulfilment of earlier orders only. |
 | PAY-018 | Extension delivers its full time | `lib/room.ts`, `lib/server.ts`, `useChatTimer.ts` | V (unit) | `tests/extension-time.test.ts` | Re-run in Razorpay test mode | PAY-003, CORE-003 |
 | GATE-001…003 | Razorpay eligibility, KYC, use case | external | IR | written confirmation | Contact Razorpay | — |
-| GATE-004 | Policies published | `app/(main)/refund-policy/page.tsx` | P | live URLs (none yet); `tests/refund-policy.test.ts` | Terms, Privacy, cancellation; deploy; legal review | GATE-008 |
+| GATE-004 | Policies published | `app/(main)/refund-policy/page.tsx` | P | live URLs (none yet); `tests/refund-policy.test.ts` | Terms, Privacy, cancellation; deploy; legal review | GATE-008 Terms + Privacy pages added 2026-10-14. |
 | GATE-005 | Live creds/webhook config | external | IR | env audit | — | GATE-002 |
 | GATE-006 | Payment testing | — | M | CI + test record | — | TEST-004 |
 | GATE-007 | Monitoring/incident | — | M | runbook | — | OPS-* |
@@ -1143,7 +1144,7 @@ Status abbreviations: **V** Verified (scope in brackets, e.g. unit/route level) 
 | PRIV-006 | Truthful claims | landing, onboarding, README | **C** | review | Fix copy | DEC-002/008 |
 | ID-001 | Consent before disclosure | `0006_contact_consent.sql`, `lib/consent.ts`, `lib/reveal.ts`, `0008_reveal_requests.sql` | V (unit) | `tests/consent-flow.test.ts`, `tests/reveal.test.ts`, `tests/payment-routes.test.ts` | Real-database test in CI; apply migrations | DEC-002, DEC-012 |
 | ID-002 | Consent ≠ payment | payment routes, `lib/payments.ts`, `lib/reveal.ts` | V (unit) | `tests/payment-routes.test.ts`, `tests/consent-flow.test.ts`, `tests/reveal.test.ts`, smoke | Run in CI | DEC-002, DEC-012 |
-| ID-003 | Informed, scoped, revocable | `ConsentBanner.tsx`, `RevealPanel.tsx`, 0006/0008 timestamps | P | review; smoke | Revocation (open gap); field choice | DEC-002, DEC-012 |
+| ID-003 | Informed, scoped, revocable | `ConsentBanner.tsx`, 0006/0008 timestamps | P | review; smoke | Revocation (open gap); field choice | DEC-002, DEC-012 |
 | ID-004 | Mutual-exchange option | `lib/consent.ts` | P | `tests/consent-flow.test.ts` | Field choice; decide on ID-004 free mutual scope | ID-001, DEC-002 |
 | SAFE-001 | Blocking | — | M | TEST-003 | Build | DATA-001 |
 | SAFE-002 | Reporting | `app/admin/*` (removal actions only) | P | test + runbook | Build user reporting and a review queue | DATA-001 |

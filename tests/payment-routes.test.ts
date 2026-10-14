@@ -272,7 +272,7 @@ describe('Paid Mode ready (fake test keys, Razorpay SDK and database mocked)', (
     it('records the order in the ledger as created, owned by the caller', async () => {
       await createOrder(post('/api/payment/create-order', { type: 'connect', roomId: ROOM }));
       expect(writesTo('payment_orders')).toEqual([
-        { table: 'payment_orders', op: 'insert', row: { user_id: 'user_alice', room_id: ROOM, order_id: ORDER, status: 'created', amount: 2900, currency: 'INR' } },
+        { table: 'payment_orders', op: 'insert', row: { user_id: 'user_alice', room_id: ROOM, order_id: ORDER, status: 'created', amount: 2900, currency: 'INR', product: 'connect' } },
       ]);
     });
 
@@ -283,11 +283,20 @@ describe('Paid Mode ready (fake test keys, Razorpay SDK and database mocked)', (
       expect(body).not.toContain(CREDENTIALS.RAZORPAY_WEBHOOK_SECRET);
     });
 
-    it('refuses a reveal order that names a person instead of a room', async () => {
-      const res = await createOrder(post('/api/payment/create-order', { type: 'reveal', targetUserId: 'user_bob' }));
+    it.each([
+      ['the old payer-only reveal', { type: 'reveal', targetUserId: 'user_bob' }],
+      ['the retired name-and-photo reveal (DEC-013)', { type: 'reveal', roomId: ROOM }],
+      ['the retired 2-minute extension (DEC-004)', { type: 'extend', roomId: ROOM }],
+    ])('refuses %s: connect is the only product', async (_name, body) => {
+      const res = await createOrder(post('/api/payment/create-order', body));
       expect(res.status).toBe(400);
       expect(mocks.ordersCreate).not.toHaveBeenCalled();
       expect(writes).toEqual([]);
+    });
+
+    it('records the product on every order, never leaving it to the column default', async () => {
+      await createOrder(post('/api/payment/create-order', { type: 'connect', roomId: ROOM }));
+      expect(writesTo('payment_orders')).toEqual([{ table: 'payment_orders', op: 'insert', row: expect.objectContaining({ product: 'connect' }) }]);
     });
 
     it('refuses an unknown product', async () => {
@@ -698,11 +707,10 @@ describe('Paid Mode ready (fake test keys, Razorpay SDK and database mocked)', (
   });
 });
 
-// PAY-017, ID-001, ID-002, PAY-011. Alice pays to see Bob's real name and photo. Only Bob's
-// own "allow" (a `reveal_requests` row with status 'allowed') makes that possible; no order,
-// signature or webhook can stand in for it.
-describe('Paid Mode: paying to see a name and photo', () => {
-  const REVEAL_ORDER = { user_id: 'user_alice', room_id: ROOM, order_id: ORDER, status: 'created', amount: 2900, currency: 'INR', product: 'reveal' };
+// PAY-017, ID-001, ID-002, PAY-011. Alice paid to see Bob's real name and photo before that
+// product was retired (DEC-013). Only Bob's own earlier "allow" (a `reveal_requests` row with
+// status 'allowed') makes that possible; no order, signature or webhook can stand in for it.
+describe('Paid Mode: a name-and-photo order from before it was retired', () => {
   const reveal = () => post('/api/payment/create-order', { type: 'reveal', roomId: ROOM });
   const ask = (status: string, overrides: Row = {}) =>
     revealRequests.push({ requester_id: 'user_alice', target_id: 'user_bob', status, payment_id: null, ...overrides });
@@ -714,46 +722,19 @@ describe('Paid Mode: paying to see a name and photo', () => {
   });
 
   describe('create-order', () => {
-    it.each(['pending', 'declined', 'revealed'])('is refused while the request is %s, before any Razorpay order exists', async (status) => {
-      ask(status);
-      const res = await createOrder(reveal());
-      expect(res.status).toBe(409);
-      expect(mocks.ordersCreate).not.toHaveBeenCalled();
-      expect(writes).toEqual([]);
-    });
-
-    it('is refused when nobody was ever asked: an order cannot create consent', async () => {
-      const res = await createOrder(reveal());
-      expect(res.status).toBe(409);
-      expect(mocks.ordersCreate).not.toHaveBeenCalled();
-      expect(revealRequests).toEqual([]);
-      expect(writes).toEqual([]);
-    });
-
-    it("is refused when only the opposite direction was allowed (Bob may see Alice, not Alice Bob)", async () => {
-      revealRequests.push({ requester_id: 'user_bob', target_id: 'user_alice', status: 'allowed', payment_id: null });
-      expect((await createOrder(reveal())).status).toBe(409);
-      expect(mocks.ordersCreate).not.toHaveBeenCalled();
-    });
-
-    it('is refused when the other dancer has no name to share', async () => {
-      ask('allowed');
-      people[0].real_name = '   ';
-      expect((await createOrder(reveal())).status).toBe(409);
-      expect(mocks.ordersCreate).not.toHaveBeenCalled();
-    });
-
-    it('once the other dancer has allowed it, creates the order at the fixed price and records it as a reveal', async () => {
-      ask('allowed');
-      const res = await createOrder(post('/api/payment/create-order', { type: 'reveal', roomId: ROOM, amount: 1 }));
-      expect(res.status).toBe(200);
-      expect(mocks.ordersCreate).toHaveBeenCalledWith(expect.objectContaining({ amount: 2900, currency: 'INR' }));
-      expect(writesTo('payment_orders')).toEqual([{ table: 'payment_orders', op: 'insert', row: REVEAL_ORDER }]);
-      // Ordering alone reveals nothing.
-      expect(revealRequests[0]).toMatchObject({ status: 'allowed', payment_id: null });
-    });
+    it.each(['pending', 'allowed', 'declined', 'revealed'])(
+      'is refused even when the request is %s: a name-and-photo reveal can no longer be bought (DEC-013)',
+      async (status) => {
+        ask(status);
+        const res = await createOrder(reveal());
+        expect(res.status).toBe(400);
+        expect(mocks.ordersCreate).not.toHaveBeenCalled();
+        expect(writes).toEqual([]);
+      },
+    );
   });
 
+  // Orders created before the reveal was retired are still honoured when their payment lands.
   describe('fulfilment', () => {
     beforeEach(() => seedOrder({ product: 'reveal' }));
 

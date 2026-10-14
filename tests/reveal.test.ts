@@ -1,6 +1,9 @@
 // ID-001..003, PRIV-001: a dancer's real name and photo are shown to another dancer only
 // after the first agreed to share with that person, and a verified payment followed.
-// Clerk, the database and push are mocked; billing is the real module with fake keys.
+// Since 2026-10-14 nobody can ask for a name and photo any more: only a paying user may
+// request, through the connect payment (DEC-013). What is tested here is what remains:
+// reading reveals granted before then, and finishing a reveal order paid for before then.
+// Clerk and the database are mocked.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type Row = Record<string, unknown>;
@@ -70,9 +73,9 @@ vi.mock('@/lib/supabaseAdmin', () => ({
   }),
 }));
 
-import { POST } from '@/app/api/rooms/[roomId]/reveal/route';
 import { resetBillingDiagnostics } from '@/lib/billing';
-import { getRevealState, getRevealed, grantReveal, listRevealed } from '@/lib/reveal';
+import * as reveal from '@/lib/reveal';
+import { getRevealed, grantReveal, listRevealed } from '@/lib/reveal';
 
 const ROOM = 'user_alice_user_bob';
 const PAID = {
@@ -85,13 +88,9 @@ const PAID = {
 const person = (clerk_id: string, display_name: string, real_name: string) => ({
   clerk_id, display_name, real_name, email: `${clerk_id}@private.example`, instagram_handle: `${clerk_id}_insta`, gender: 'female', last_seen: new Date().toISOString(),
 });
-const act = (action: unknown, roomId = ROOM) =>
-  POST(new Request('http://localhost/api/rooms/x/reveal', { method: 'POST', body: JSON.stringify({ action }) }), { params: { roomId } });
-const as = (userId: string | null) => (mocks.userId = userId);
 const requests = () => mocks.db.reveal_requests;
 const seed = (requester_id: string, target_id: string, status: string, payment_id: string | null = null) =>
   requests().push({ requester_id, target_id, status, payment_id });
-const say = (sender_id: string) => mocks.db.messages.push({ room_id: ROOM, sender_id });
 
 beforeEach(() => {
   for (const [k, v] of Object.entries(PAID)) vi.stubEnv(k, v);
@@ -115,149 +114,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('POST /api/rooms/[roomId]/reveal', () => {
-  it('requires a signed-in user', async () => {
-    as(null);
-    expect((await act('request')).status).toBe(401);
-    expect(requests()).toEqual([]);
-  });
-
-  it('rejects an unknown action', async () => {
-    expect((await act('reveal')).status).toBe(400);
-    expect((await act(undefined)).status).toBe(400);
-  });
-
-  it('refuses a room the caller is not in', async () => {
-    as('user_carol');
-    expect((await act('request')).status).toBe(403);
-    expect(requests()).toEqual([]);
-  });
-
-  describe('asking', () => {
-    it('needs both dancers to have written in the chat first', async () => {
-      expect((await act('request')).status).toBe(409);
-      say('user_alice');
-      expect((await act('request')).status).toBe(409);
-      expect(requests()).toEqual([]);
-      expect(mocks.notifyRevealRequest).not.toHaveBeenCalled();
-    });
-
-    it('creates a pending request from the caller about their partner, and tells the partner by nickname', async () => {
-      say('user_alice');
-      say('user_bob');
-      const res = await act('request');
-      expect(res.status).toBe(200);
-      expect((await res.json()).reveal).toMatchObject({ outgoing: 'pending', incoming: 'none' });
-      expect(requests()).toEqual([expect.objectContaining({ requester_id: 'user_alice', target_id: 'user_bob', status: 'pending', payment_id: null })]);
-      expect(mocks.notifyRevealRequest).toHaveBeenCalledWith('user_bob', 'DiyaDancer_Avni_4821', ROOM);
-    });
-
-    it('asking does not show the asker anything', async () => {
-      say('user_alice');
-      say('user_bob');
-      const body = JSON.stringify(await (await act('request')).json());
-      for (const secret of ['Bob Sharma', 'user_bob@private.example', 'bob.jpg']) expect(body).not.toContain(secret);
-      expect(await getRevealed('user_alice', 'user_bob')).toBeNull();
-    });
-
-    it('cannot be repeated: a second ask adds nothing, and a no is final', async () => {
-      say('user_alice');
-      say('user_bob');
-      await act('request');
-      await act('request');
-      expect(requests()).toHaveLength(1);
-      as('user_bob');
-      await act('decline');
-      as('user_alice');
-      const res = await act('request');
-      expect((await res.json()).reveal.outgoing).toBe('declined');
-      expect(requests()).toEqual([expect.objectContaining({ status: 'declined' })]);
-    });
-  });
-
-  describe('answering', () => {
-    beforeEach(() => seed('user_alice', 'user_bob', 'pending'));
-
-    it('the person who asked cannot allow their own request', async () => {
-      as('user_alice');
-      expect((await act('allow')).status).toBe(409);
-      expect(requests()[0].status).toBe('pending');
-    });
-
-    it('only the person asked can allow, and that makes it allowed, not revealed', async () => {
-      as('user_bob');
-      const res = await act('allow');
-      expect(res.status).toBe(200);
-      expect((await res.json()).reveal).toMatchObject({ incoming: 'allowed' });
-      expect(requests()[0]).toMatchObject({ status: 'allowed', payment_id: null });
-      // Agreed, but nobody has paid: still nothing to see.
-      expect(await getRevealed('user_alice', 'user_bob')).toBeNull();
-    });
-
-    it('before answering, the person asked is shown exactly what they would share, and never their email', async () => {
-      const state = await getRevealState('user_bob', 'user_alice');
-      expect(state).toEqual({ outgoing: 'none', incoming: 'pending', sharing: { real_name: 'Bob Sharma', image_url: 'https://img.example/bob.jpg' } });
-      expect(JSON.stringify(state)).not.toContain('private.example');
-      // The asker's view of the same request carries nothing about Bob.
-      expect(await getRevealState('user_alice', 'user_bob')).toEqual({ outgoing: 'pending', incoming: 'none', sharing: null });
-    });
-
-    it('allowing needs a real name on the profile', async () => {
-      mocks.db.users[1].real_name = '  ';
-      as('user_bob');
-      expect((await act('allow')).status).toBe(409);
-      expect(requests()[0].status).toBe('pending');
-    });
-
-    it('declining a pending request, or withdrawing a yes before payment, ends it', async () => {
-      as('user_bob');
-      expect((await act('decline')).status).toBe(200);
-      expect(requests()[0].status).toBe('declined');
-
-      requests()[0].status = 'allowed';
-      expect((await act('decline')).status).toBe(200);
-      expect(requests()[0].status).toBe('declined');
-      // A declined request cannot be turned back into a yes.
-      expect((await act('allow')).status).toBe(409);
-      expect(requests()[0].status).toBe('declined');
-    });
-
-    it('a reveal that was paid for cannot be undone by declining', async () => {
-      requests()[0].status = 'revealed';
-      as('user_bob');
-      await act('decline');
-      expect(requests()[0].status).toBe('revealed');
-    });
-
-    it('a third dancer cannot answer for either of them', async () => {
-      as('user_carol');
-      expect((await act('allow')).status).toBe(403);
-      expect((await act('allow', 'user_bob_user_carol')).status).not.toBe(200);
-      expect(requests()[0].status).toBe('pending');
-    });
-  });
-
-  describe('with billing off', () => {
-    beforeEach(() => vi.stubEnv('BILLING_MODE', ''));
-
-    it('nothing new can be asked or agreed, and nothing is written', async () => {
-      say('user_alice');
-      say('user_bob');
-      const asked = await act('request');
-      expect(asked.status).toBe(403);
-      expect(await asked.json()).toEqual({ error: 'billing_disabled' });
-      seed('user_alice', 'user_bob', 'pending');
-      as('user_bob');
-      expect((await act('allow')).status).toBe(403);
-      expect(requests()[0].status).toBe('pending');
-    });
-
-    it('saying no still works', async () => {
-      seed('user_alice', 'user_bob', 'pending');
-      as('user_bob');
-      expect((await act('decline')).status).toBe(200);
-      expect(requests()[0].status).toBe('declined');
-    });
+describe('only paying users may request (DEC-013)', () => {
+  it('nothing is left that could create, allow or decline a name-and-photo request', () => {
+    // Reading granted reveals, and finishing a reveal paid for before the change, are all that remain.
+    expect(Object.keys(reveal).sort()).toEqual(['getRevealed', 'grantReveal', 'listRevealed']);
   });
 });
 
@@ -296,7 +156,6 @@ describe('what one dancer may see of another (getRevealed)', () => {
   it('never reads the old `reveals` table, whose rows were created by payment alone (DEC-003)', async () => {
     seed('user_alice', 'user_bob', 'revealed', 'pay_1');
     await getRevealed('user_alice', 'user_bob');
-    await getRevealState('user_alice', 'user_bob');
     await listRevealed('user_alice');
     expect(mocks.touched).not.toContain('reveals'); // and the fake throws for any table it does not know
     expect(new Set(mocks.touched)).toEqual(new Set(['reveal_requests', 'users']));
@@ -305,7 +164,6 @@ describe('what one dancer may see of another (getRevealed)', () => {
   it('shows nothing, and does not fail, when migration 0008 has not been applied', async () => {
     mocks.missingTable = true;
     expect(await getRevealed('user_alice', 'user_bob')).toBeNull();
-    expect(await getRevealState('user_alice', 'user_bob')).toEqual({ outgoing: 'none', incoming: 'none', sharing: null });
     expect(await listRevealed('user_alice')).toEqual([]);
   });
 });

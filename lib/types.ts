@@ -54,15 +54,6 @@ export type RevealedIdentity = {
 /** Where a request to see someone's name and photo stands. 'none': never asked. */
 export type RevealStatus = 'none' | 'pending' | 'allowed' | 'declined' | 'revealed';
 
-export type RevealState = {
-  /** My request to see my partner. */
-  outgoing: RevealStatus;
-  /** My partner's request to see me. */
-  incoming: RevealStatus;
-  /** What I would be sharing, shown to me while I decide. Only set while `incoming` is 'pending'. */
-  sharing: RevealedIdentity | null;
-};
-
 export type ConsentStatus = 'pending' | 'accepted' | 'declined' | 'expired';
 
 /** Where a room's connect request stands, from one participant's side. */
@@ -88,15 +79,17 @@ export type RoomState = {
   consent: RoomConsent;
   /** The partner's contact details (name + email), set once a contact_reveals row exists for the pair (connect flow). */
   revealed: RevealedIdentity | null;
-  /** The reveal-request state for the reveal flow (reveal_requests table). */
-  reveal: RevealState;
+  /** The partner's real name and photo, if they agreed to share them before the free ask was retired (DEC-013). */
+  sharedWithMe: RevealedIdentity | null;
 };
 
 /**
  * Paid products.
  * 'connect' — makes the chat unlimited and asks the partner to exchange contact details.
  *             The payment never discloses anything itself; only the partner's consent does (ID-002).
- * 'extend'  — adds two minutes to the chat (collaborator flow).
- * 'reveal'  — shows the other dancer's real name and photo, after they agreed (ID-001, PAY-017).
+ * 'extend'  — retired: adds two minutes. Only on orders created before it was withdrawn (DEC-004).
+ * 'reveal'  — retired: real name and photo after the other dancer agreed. Only on orders created
+ *             before only paying users could request (DEC-013, ID-001, PAY-017).
+ * create-order sells 'connect' only.
  */
 export type PaymentType = 'connect' | 'extend' | 'reveal';

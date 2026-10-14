@@ -2,7 +2,6 @@ import { billingDisabledResponse } from '@/lib/billing';
 import { getRoomConsent } from '@/lib/consent';
 import { recordOrder, type OrderNotes } from '@/lib/payments';
 import { razorpay } from '@/lib/razorpay';
-import { hasRealName, isRevealAllowed } from '@/lib/reveal';
 import { PRICE_PAISE, partnerFromRoomId } from '@/lib/room';
 import { HttpError, errorResponse, loadRoom, requireUserId } from '@/lib/server';
 import { isRecord } from '@/lib/utils';
@@ -23,35 +22,30 @@ export async function POST(req: Request) {
     const type = isRecord(body) ? body.type : undefined;
     const roomId = isRecord(body) ? body.roomId : undefined;
 
-    if (type !== 'connect' && type !== 'extend' && type !== 'reveal') throw new HttpError(400, 'Unknown payment type');
-    const partnerId = typeof roomId === 'string' ? partnerFromRoomId(roomId, userId) : null;
-    if (typeof roomId !== 'string' || !partnerId) throw new HttpError(400, 'Unknown room');
+    // 'connect' is the only thing that can be bought, and buying it is the only way to ask
+    // anyone for their identity: only a paying user may request (DEC-013). It makes the chat
+    // unlimited and asks the partner to share contact details; it never discloses anything by
+    // itself (DEC-002, ID-002). The 2-minute extension and the separate name-and-photo reveal
+    // are retired; orders for them created before then are still fulfilled (lib/payments.ts).
+    if (type !== 'connect') throw new HttpError(400, 'Unknown payment type');
+    if (typeof roomId !== 'string' || !partnerFromRoomId(roomId, userId)) throw new HttpError(400, 'Unknown room');
 
-    if (type === 'connect') {
-      // Take no money for something that could not be delivered: the room and
-      // both dancers must exist, the room must be able to take a request, and
-      // it must not already be unlimited (one payment per room).
-      const { room } = await loadRoom(roomId, userId);
-      const consent = await getRoomConsent(roomId, userId);
-      if (!consent.canRequest || room.unlimited) {
-        throw new HttpError(
-          409,
-          consent.status === 'accepted'
-            ? 'You two are already connected'
-            : consent.status === 'pending'
-              ? 'A request to share contact details is already waiting for an answer'
-              : !consent.canRequest
-                ? 'You have already asked in this chat'
-                : 'This chat already has no time limit',
-        );
-      }
-    }
-
-    if (type === 'reveal') {
-      // A reveal can be bought only after the other dancer has agreed, and only while that
-      // agreement stands. The buyer cannot create it, and neither can this route (ID-001, PAY-017).
-      if (!(await isRevealAllowed(userId, partnerId))) throw new HttpError(409, 'They have not agreed to share their name and photo');
-      if (!(await hasRealName(partnerId))) throw new HttpError(409, 'They have no name to share yet');
+    // Take no money for something that could not be delivered: the room and
+    // both dancers must exist, the room must be able to take a request, and
+    // it must not already be unlimited (one payment per room).
+    const { room } = await loadRoom(roomId, userId);
+    const consent = await getRoomConsent(roomId, userId);
+    if (!consent.canRequest || room.unlimited) {
+      throw new HttpError(
+        409,
+        consent.status === 'accepted'
+          ? 'You two are already connected'
+          : consent.status === 'pending'
+            ? 'A request to share contact details is already waiting for an answer'
+            : !consent.canRequest
+              ? 'You have already asked in this chat'
+              : 'This chat already has no time limit',
+      );
     }
 
     // Amount is fixed here, never taken from the client.

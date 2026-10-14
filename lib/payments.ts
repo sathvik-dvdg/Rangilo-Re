@@ -46,8 +46,9 @@ export type PaymentOrder = {
 /** What create-order writes on the Razorpay order, for reading in their dashboard only. */
 export type OrderNotes = { type: PaymentType; userId: string; roomId: string };
 
-// Every column: `product` (migration 0008) may not exist yet, and a row without it is an extension.
-const ORDER_COLUMNS = 'id, user_id, room_id, order_id, payment_id, status, amount, currency, product';
+// Every column, not a list: `product` (migration 0008) may not exist yet, and naming it would make
+// every read fail on such a database. A row without it is read as 'connect', the only product sold.
+const ORDER_COLUMNS = '*';
 const EXTENSION_SECONDS = 120;
 
 // Postgres unique_violation: the room already has an open or accepted request (migration 0006).
@@ -82,8 +83,9 @@ export async function recordOrder(order: { userId: string; roomId: string; order
     status: 'created',
     amount: order.amount,
     currency: order.currency,
-    // 'connect' is the default; write the product explicitly for extend and reveal.
-    ...((order.product === 'extend' || order.product === 'reveal') ? { product: order.product } : {}),
+    // Always written, never left to the column default: on a database with 0008 but not 0009 the
+    // default is 'extend', and a connect order recorded that way would be fulfilled as 2 minutes.
+    product: order.product,
   });
   if (error) throw error;
 }
@@ -117,10 +119,11 @@ const FOREIGN_KEY_VIOLATION = '23503';
  *
  * 'connect' — makes the room unlimited immediately, then creates a pending
  *   contact-consent request. The request discloses nothing; only the partner's
- *   explicit answer does (ID-002, DEC-002).
- * 'extend'  — adds two minutes to the room via chat_extensions.
- * 'reveal'  — grants the reveal-request if (and only if) the partner's consent
- *   still stands (ID-001, PAY-017).
+ *   explicit answer does (ID-002, DEC-002). The only product sold now (DEC-013).
+ * 'extend', 'reveal' — retired and no longer sold. Kept only so an order
+ *   created before they were retired is still honoured if its payment arrives:
+ *   'extend' adds two minutes; 'reveal' is granted only if the partner's
+ *   earlier yes still stands (ID-001, PAY-017).
  *
  * Throws FulfilmentError for a permanent failure. Routes call fulfilOrder,
  * which records that on the ledger.

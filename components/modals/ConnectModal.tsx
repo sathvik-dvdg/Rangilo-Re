@@ -56,9 +56,18 @@ export function ConnectModal({
       {error && <p className="mt-4 text-sm text-[#E58A7F]">{error}</p>}
       <p className="mt-5 text-xs text-paper/50">
         By paying you agree to our{' '}
+        <Link href="/terms" target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:text-paper">
+          Terms
+        </Link>{' '}
+        and{' '}
         <Link href="/refund-policy" target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:text-paper">
           Refund Policy
         </Link>
+        . See our{' '}
+        <Link href="/privacy" target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:text-paper">
+          Privacy Policy
+        </Link>
+        .
       </p>
       <RazorpayButton busy={busy} onClick={onPay} label="Pay ₹29 with Razorpay" />
     </BottomSheet>

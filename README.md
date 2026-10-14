@@ -18,7 +18,7 @@ Known gaps that block a public launch (details and IDs in `OBJECTIVES.md` §17 a
 
 - No blocking, reporting, age confirmation or rate limiting yet.
 - The landing page still shows placeholder statistics, testimonials and ₹29 claims that need replacing.
-- Identity sharing is being redesigned as free, mutual and opt-in. The older paid "reveal" purchase flow has been removed; identities from any existing `reveals` rows are still shown, and what to do with them is undecided (`OBJECTIVES.md` DEC-003).
+- Only a paying user can ask for anyone's identity: the ₹29 connect payment is the only request there is, and the other dancer must accept it (`OBJECTIVES.md` DEC-002, DEC-013). Rows in the old payer-only `reveals` table are not shown; what to do with them is undecided (DEC-003).
 - Realtime presence channels are public.
 - Payment provider eligibility, a payment ledger and reconciliation are unresolved.
 
@@ -86,9 +86,9 @@ The server decides the mode in one place, [`lib/billing.ts`](lib/billing.ts), fr
 
 To work on Paid Mode with test keys: copy the key id and secret from Razorpay Dashboard → Settings → API Keys (test mode), add a webhook at `https://<your-domain>/api/webhooks/razorpay` for `payment.captured` and `payment.failed`, put its secret in `RAZORPAY_WEBHOOK_SECRET`, run `supabase/migrations/0002_payment_orders.sql`, `0003_fulfilment_failed_and_webhook_events.sql`, `0006_contact_consent.sql`, `0008_reveal_requests.sql`, and `0009_payment_product_connect.sql` in the SQL editor, and set `BILLING_MODE=paid`.
 
-There are two payment flows supported in Paid Mode:
-- **Connect Flow (₹29):** Bought once per room. A confirmed payment removes the time limit on that chat at once (`rooms.unlimited`), and asks the other dancer to share contact details. If they accept, each sees the other's real name and email. If they decline or do not answer within 24 hours, nothing is shared, the chat stays unlimited, and there is no refund.
-- **Reveal Flow (₹29):** A dancer asks to see the partner's real name and profile photo; the partner can allow or decline. Only after an allow can the buyer pay ₹29 to reveal name and photo. Payment alone never reveals anyone without prior agreement, and email is never shared via this flow.
+There is one thing to buy in Paid Mode, and buying it is the only way to ask the other dancer for anything (DEC-013):
+- **Connect (₹29):** Bought once per room. A confirmed payment removes the time limit on that chat at once (`rooms.unlimited`), and asks the other dancer to share contact details. If they accept, each sees the other's real name and email. If they decline or do not answer within 24 hours, nothing is shared, the chat stays unlimited, and there is no refund.
+- The free "ask to see name & photo" request and its separate ₹29 purchase were removed on 2026-10-14, as was the paid 2-minute extension. Name-and-photo reveals granted before then still show, and an order for either that was created before then is still honoured if its payment arrives. `0008_reveal_requests.sql` is still needed for those.
 
 ## Checks
 
