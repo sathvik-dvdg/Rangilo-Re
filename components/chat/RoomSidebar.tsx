@@ -4,7 +4,7 @@ import { Check } from 'lucide-react';
 import { Avatar } from '@/components/ui/Avatar';
 import { GenderBadge } from '@/components/ui/GenderBadge';
 import { cn } from '@/lib/utils';
-import type { PublicProfile } from '@/lib/types';
+import type { PublicProfile, RevealedIdentity } from '@/lib/types';
 
 type StepState = 'done' | 'now' | 'next';
 
@@ -17,9 +17,12 @@ export function RoomSidebar({
   expired,
   unlimited = false,
   connected = false,
+  revealed,
   className,
 }: {
   partner: PublicProfile;
+  /** The partner's real name and photo, if they agreed to share them with this viewer (reveal flow). */
+  revealed?: RevealedIdentity | null;
   partnerHere: boolean;
   bothSpoke: boolean;
   started: boolean;
@@ -55,8 +58,9 @@ export function RoomSidebar({
   return (
     <aside className={cn('w-80 shrink-0 flex-col gap-4 overflow-y-auto', className)}>
       <section className="grain rounded-2xl border border-paper/10 bg-ink-2 p-6 text-center">
-        <Avatar name={partner.display_name} gender={partner.gender} size={88} className="mx-auto" />
-        <h2 className="mt-4 break-words font-display text-lg leading-tight text-paper">{partner.display_name}</h2>
+        <Avatar name={partner.display_name} gender={partner.gender} imageUrl={revealed?.image_url} size={88} className="mx-auto" />
+        <h2 className="mt-4 break-words font-display text-lg leading-tight text-paper">{revealed?.real_name || partner.display_name}</h2>
+        {revealed?.real_name && <p className="mt-0.5 break-words text-xs text-paper/50">{partner.display_name}</p>}
         <p className={cn('mt-1 text-xs font-semibold', partnerHere ? 'text-[#9CC587]' : 'text-paper/50')}>{partnerHere ? 'In the room' : 'Away'}</p>
         <div className="mt-3 flex flex-wrap items-center justify-center gap-1.5">
           <GenderBadge gender={partner.gender} />

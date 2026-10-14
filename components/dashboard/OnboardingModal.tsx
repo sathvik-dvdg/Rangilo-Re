@@ -390,7 +390,7 @@ export function OnboardingModal({
                         </p>
                       </div>
                       <p className="mt-1.5 text-xs text-paper/60 leading-relaxed">
-                        These stay hidden from other dancers. They are shared with one dancer only if you both agree to exchange contact details.
+                        These stay hidden from other dancers. Your real name is shown to someone only if they ask and you agree, or if you both exchange contact details. Paying alone never discloses anything. Your email is only shared if you both agree to connect.
                       </p>
 
                       <div className="mt-3.5 space-y-3">
@@ -494,7 +494,7 @@ export function OnboardingModal({
                       Profile photo
                     </h2>
                     <p className="mt-1 text-sm text-paper/60">
-                      Optional. Used only on your private account — other dancers see festive initials, never your photo.
+                      Optional. Other dancers see a festive avatar, not your photo. Your photo is shown to someone only if they ask and you say yes.
                     </p>
                     <label className="mt-6 flex cursor-pointer items-center gap-4 rounded-lg border border-dashed border-paper/25 p-4 focus-within:border-haldi focus-within:ring-2 focus-within:ring-haldi hover:border-haldi transition-colors">
                       {photo || user?.imageUrl ? (

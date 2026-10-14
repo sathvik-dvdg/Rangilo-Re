@@ -48,7 +48,7 @@ jobs:
       # since only NEXT_PUBLIC_* values are).
       - name: Client bundle does not reference server secrets
         run: |
-          if grep -rlE 'RAZORPAY_KEY_SECRET|RAZORPAY_WEBHOOK_SECRET|SUPABASE_SERVICE_ROLE_KEY|BILLING_MODE' .next/static; then
+          if grep -rlE 'RAZORPAY_KEY_SECRET|RAZORPAY_WEBHOOK_SECRET|SUPABASE_SERVICE_ROLE_KEY|BILLING_MODE|VAPID_PRIVATE_KEY' .next/static; then
             echo "::error::A server-only variable is referenced in the client bundle"
             exit 1
           fi

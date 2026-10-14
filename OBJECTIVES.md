@@ -69,6 +69,7 @@ At baseline **no objective is Verified**: the repository has no test suite and n
 | Auth | `@clerk/nextjs` `^5.7.6` via `clerkMiddleware` |
 | Database / realtime | `@supabase/supabase-js` `^2.117.2`; Postgres + Realtime (postgres_changes + presence) |
 | Payments | `razorpay` `^2.9.8` server SDK + Checkout.js loaded from `checkout.razorpay.com` at click time |
+| Notifications | `web-push` `^3.6.7` (server; signs and encrypts Web Push messages) + `public/sw.js` service worker; added 2026-10-14 |
 | Client state | Zustand 5 (`store/useAppStore.ts`) |
 | Lists | `react-window` (dashboard) |
 | Scripts | `dev`, `build`, `start`, `lint` (`next lint`), `typecheck` (`tsc --noEmit`), `test` (`vitest run`, added 2026-10-13). |
@@ -97,31 +98,41 @@ Razorpay ──► POST /api/webhooks/razorpay (signature-checked, no Clerk auth
 | `app/(main)/dashboard/actions.ts` `rerollDisplayName`, `completeOnboarding` | Clerk `auth()` | Nickname generation; create/overwrite own `users` row (copies real name + email from Clerk) |
 | `GET /api/users` | `requireUserId` | Up to 2000 other users, `PUBLIC_COLUMNS` = `clerk_id, display_name, gender, last_seen` |
 | `POST /api/me/heartbeat` | `requireUserId` | Updates own `is_online`, `last_seen` |
-| `GET /api/rooms/[roomId]` | `requireUserId` + `loadRoom` | Room state, last 500 messages, extensions, revealed identity |
-| `POST /api/rooms/[roomId]/messages` | same | Insert message; rejects after expiry |
+| `GET /api/rooms/[roomId]` | `requireUserId` + `loadRoom` | Room state, last 500 messages, extensions, where each reveal request stands, and the partner's name and photo if they agreed and the caller paid |
+| `POST /api/rooms/[roomId]/messages` | same | Insert message; rejects after expiry; then sends the partner a Web Push notification if push is configured (`lib/push.ts`) |
+| `POST /api/rooms/[roomId]/reveal` | `requireUserId` + `loadRoom` | `request` to see the partner's name and photo, or `allow` / `decline` the partner's request; `request` and `allow` are refused with billing off |
+| `GET /api/reveals` | `requireUserId` | Real name and photo of the dancers who agreed to share with the caller and whose reveal the caller paid for |
+| `GET` / `POST` / `DELETE /api/push/subscribe` | `requireUserId` | Whether push is configured and its public key; store this browser's push subscription for the caller; remove the caller's subscription |
+| `/admin`, `/admin/users`, `/admin/rooms` (pages) | `requireAdmin` (Clerk public metadata `role: "admin"`; 404 otherwise) | Counts and audit log; dancer roster including real name and email (each view recorded); room list without message text |
+| `app/admin/actions.ts` `removeUser`, `removeRoom` | `requireAdmin` | Audit row first, then delete a dancer's profile, rooms and reveals (optionally banning the Clerk account), or delete one room |
 | `POST /api/rooms/[roomId]/read` | same | Read receipts |
 | `POST /api/rooms/[roomId]/timer` | same | Sets `timer_started_at` once both have sent a message |
-| `POST /api/payment/create-order` | `requireUserId` | Creates a Razorpay order for a chat extension, ₹29 fixed server-side, and a `payment_orders` ledger row |
+| `POST /api/payment/create-order` | `requireUserId` | Creates a Razorpay order, ₹29 fixed server-side, and a `payment_orders` ledger row, for a chat extension or for a reveal the other dancer has already allowed (refused otherwise, PAY-017) |
 | `POST /api/payment/verify` | `requireUserId` | HMAC check, ledger ownership check, payment fetched from Razorpay and checked (`captured`, order id, amount, currency), `fulfilOrder()`; returns `{ verified }` |
 | `POST /api/webhooks/razorpay` | Signature only | Skips an event id already in `webhook_events`; `payment.captured` → `fulfilOrder()`; `payment.failed` → ledger `failed`; then records the event id and outcome |
 
-### 3.4 Data model — Verified (source), `supabase/migrations/0001_init.sql`, `0002_payment_orders.sql`, `0003_fulfilment_failed_and_webhook_events.sql`, `0004_campus_branch.sql`, `0005_campus_vibe_outfit_instagram.sql`
+### 3.4 Data model — Verified (source), `supabase/migrations/0001_init.sql`, `0002_payment_orders.sql`, `0003_fulfilment_failed_and_webhook_events.sql`, `0004_campus_branch.sql`, `0005_campus_vibe_outfit_instagram.sql`, `0006_contact_consent.sql`, `0006_push_subscriptions.sql`, `0007_admin_actions.sql`, `0008_reveal_requests.sql`, `0009_payment_product_connect.sql`
 
 | Table | Key columns | RLS read policy | Client writes |
 |---|---|---|---|
 | `users` | `clerk_id` unique, `display_name` unique, `gender`, `real_name`, `email`, `is_online`, `last_seen`; `branch`, `college_year` (0004); `vibe_tag`, `outfit_color`, `instagram_handle` (0005, all added 2026-10-14) | own row only | none (no write policies) |
-| `rooms` | `id` = sorted Clerk ids joined by `_`, `participant_ids[2]`, `timer_started_at` | participants | none |
+| `rooms` | `id` = sorted Clerk ids joined by `_`, `participant_ids[2]`, `timer_started_at`, `unlimited` (0006) | participants | none |
 | `messages` | `room_id` FK, `sender_id` (no FK), `text` 1–1000 chars, `read_by[]` | room participants | none |
-| `reveals` | `payer_id`, `target_id`, `payment_id` unique, unique(`payer_id`,`target_id`) | payer | none |
+| `reveals` | `payer_id`, `target_id`, `payment_id` unique, unique(`payer_id`,`target_id`). No longer read or written by the app since 2026-10-14 (DEC-003, DEC-012) | payer | none |
+| `contact_consents` (0006, added 2026-10-14) | `room_id` FK, `requester_id`, `partner_id`, `status` (`pending`/`accepted`/`declined`/`expired`), `payment_order_id` unique FK, `requested_at`, `responded_at`; in Realtime publication | requester or partner | none |
+| `contact_reveals` (0006, added 2026-10-14) | `room_id` FK, `user_a_id`, `user_b_id`, `consent_id` FK, `revealed_at`; unique(`user_a_id`, `user_b_id`) | pair only | none |
+| `reveal_requests` (0008, added 2026-10-14) | `requester_id`, `target_id` (both FK → `users.clerk_id`, cascade), `status` (`pending`/`allowed`/`declined`/`revealed`), `responded_at`, `payment_id` unique, `revealed_at`; unique(`requester_id`,`target_id`); in the Realtime publication | requester or target | none |
 | `chat_extensions` | `room_id` FK, `payment_id` unique, `extra_seconds` | room participants | none |
-| `payment_orders` (0002, added 2026-10-14) | `user_id`, `room_id` (no FK), `order_id` unique, `payment_id` unique, `status` (`created`/`paid`/`failed`/`fulfilment_failed`, the last added by 0003), `amount`, `currency` | none (service role only) | none |
+| `payment_orders` (0002, added 2026-10-14; product column in 0008/0009) | `user_id`, `room_id` (no FK), `order_id` unique, `payment_id` unique, `status` (`created`/`paid`/`failed`/`fulfilment_failed`/`refunded`), `amount`, `currency`, `product` (`connect`/`extend`/`reveal`) | none (service role only) | none |
 | `webhook_events` (0003, added 2026-10-14) | `event_id` primary key (Razorpay event id), `event`, `order_id`, `payment_id` (no FKs), `outcome`, `received_at` | none (service role only) | none |
+| `push_subscriptions` (0006, added 2026-10-14) | `user_id` FK → `users.clerk_id` (cascade delete), `endpoint` unique, `p256dh`, `auth`, `updated_at` | none (service role only) | none |
+| `admin_actions` (0007, added 2026-10-14) | `admin_id`, `action` (`view_roster`/`remove_user`/`block_user`/`remove_room`), `target`, `created_at`; append-only | none (service role only) | none |
 
 Realtime publication: `messages`, `rooms`, `chat_extensions`. `webhook_events` records the webhook events handled in Paid Mode; there is no fuller payment-event audit table and no blocks/reports tables. Whether this migration is what is actually applied to any live database is *Information Required*; the README instructs pasting it into the SQL editor, so there is no migration-version tracking.
 
 ### 3.5 Environment variables — Verified (source), names only
 
-`.env.example` defines: `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, four `NEXT_PUBLIC_CLERK_*_URL` vars, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, `NEXT_PUBLIC_RAZORPAY_KEY_ID`. `.env` and `.env*.local` are gitignored. `BILLING_MODE` (added 2026-10-13, documented in `.env.example`) is read only by `lib/billing.ts`.
+`.env.example` defines: `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, four `NEXT_PUBLIC_CLERK_*_URL` vars, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, `NEXT_PUBLIC_RAZORPAY_KEY_ID`. `.env` and `.env*.local` are gitignored. `BILLING_MODE` (added 2026-10-13, documented in `.env.example`) is read only by `lib/billing.ts`. `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and `VAPID_SUBJECT` (added 2026-10-14, optional, all server-only) are read only by `lib/push.ts`. The admin console needs no environment variable: admins are marked in Clerk (ADMIN-001).
 
 ---
 
@@ -143,7 +154,7 @@ Classification of what exists today. "Implemented — unverified" means the code
 | Realtime sync / reconnection | Partial | postgres_changes subscription; no resync of messages missed while disconnected. |
 | Read receipts | Partial | Works in the normal case; read-modify-write race on `read_by[]`. |
 | Blocking | Missing | — |
-| Reporting / moderation | Missing | — |
+| Reporting / moderation | Partial — admin console can remove dancers and rooms and block sign-in (ADMIN-002); no way for users to report yet | `app/admin/*`, `lib/admin.ts` |
 | Rate limiting / abuse prevention | Missing | — |
 | Age safeguards | Missing | — |
 | Account deletion / retention | Missing | No Clerk deletion webhook; no retention policy. |
@@ -307,10 +318,10 @@ Classification of what exists today. "Implemented — unverified" means the code
 - **Risks:** —
 
 #### FREE-006 — Identity sharing in Free Mode follows the consent model
-- **Requirement (DEC-002 decided 2026-10-13):** Identity sharing is free, mutual and opt-in, as specified in ID-001…ID-004. No payment is involved.
+- **Requirement (DEC-002 decided 2026-10-13; revised by DEC-012 on 2026-10-14):** Free Mode offers no way to ask for, agree to or buy anyone's identity. A reveal already granted under ID-001 stays visible if the mode is switched off. The free, mutual exchange of ID-004 is not built.
 - **Why:** Identity sharing is a safety feature first; it must not be gated by payment.
-- **Files:** none yet.
-- **Status:** Retired 2026-10-14 (user instruction, answering the open question in DEC-002): there is no contact exchange in Free Mode. Contact exchange exists only as the paid connect request, and still requires the other person's acceptance (ID-001). One Free Mode behaviour remains by design: a request paid for while Paid Mode was on can still be answered after a rollback (FREE-007).
+- **Files:** `app/api/rooms/[roomId]/reveal/route.ts` (refuses `request` and `allow` with billing off), `components/chat/ChatRoom.tsx` (reveal controls render only in Paid Mode).
+- **Status:** Implemented for reveal flow (refuses `request` and `allow` in Free Mode, `tests/reveal.test.ts`, `tests/smoke/free-mode.test.ts`); free contact exchange is retired under DEC-002, existing only as the paid connect request with partner acceptance (ID-001). One Free Mode behaviour remains: a request paid for while Paid Mode was on can still be answered after a rollback (FREE-007).
 - **Depends on:** ID-001…ID-004.
 - **Acceptance:** See ID-001.
 - **Evidence:** See ID-001.
@@ -319,7 +330,7 @@ Classification of what exists today. "Implemented — unverified" means the code
 #### FREE-007 — Mode switches are non-destructive
 - **Requirement:** Changing `BILLING_MODE` in either direction deletes or rewrites no users, rooms, messages, payment records or entitlements. Previously granted extensions keep counting toward room time. Previously granted identity reveals are handled per DEC-003.
 - **Why:** Requirement 9.
-- **Files:** `lib/server.ts` (`extraSecondsFor` already sums all extensions irrespective of mode).
+- **Files:** `lib/server.ts` (`extraSecondsFor` counts every extension irrespective of mode; since 2026-10-14 by when each was paid for, PAY-018; `rooms.unlimited`, `contact_consents` and `contact_reveals` are read in every mode).
 - **Status:** Implemented — unverified for extensions (no mode code exists that could delete anything); reveals pending DEC-003. Since 2026-10-14 the same holds for connect requests: `rooms.unlimited`, `contact_consents` and `contact_reveals` are read in every mode, and `POST /api/rooms/[roomId]/consent` is not gated on the billing mode, so a request paid for in Paid Mode can be answered, and a connected room stays unlimited, after a switch to Free Mode (`tests/smoke/free-mode.test.ts` renders both with no payment UI; no mode-flip integration test). The server also runs on a database without migration 0006 (`tests/consent-flow.test.ts` "a database without migration 0006").
 - **Depends on:** CFG-001, DEC-003.
 - **Acceptance:** Integration test: seed data, flip mode free→paid→free, row counts and room remaining-time unchanged.
@@ -360,7 +371,7 @@ Classification of what exists today. "Implemented — unverified" means the code
 - **Requirement:** Collect only data with a stated purpose. Real name and email are copied from Clerk into `users` only if the identity-sharing feature (DEC-002) needs them, and the user is told why. Profile photos are not collected unless used.
 - **Why:** DPDP-style purpose limitation; reduces breach impact.
 - **Files:** `actions.ts:30-45` copies `real_name`, `email`; `components/dashboard/OnboardingModal.tsx:29-32` uploads a profile photo to Clerk that the app never displays (`components/ui/Avatar.tsx` is initials-only).
-- **Status:** Conflicts. Since the 2026-10-14 merge of `origin/main`, onboarding also collects `branch`, `college_year`, `vibe_tag` and `outfit_color` (public, shown in discovery and the campus leaderboard) and `instagram_handle` (private). No code path shows `instagram_handle` to anyone, so it is collected with no current purpose; whether to keep it for the ID-004 exchange or stop collecting it needs an owner decision.
+- **Status:** Conflicts. Since the 2026-10-14 merge of `origin/main`, onboarding also collects `branch`, `college_year`, `vibe_tag` and `outfit_color` (public, shown in discovery and the campus leaderboard) and `instagram_handle` (private). No code path shows `instagram_handle` to anyone, so it is collected with no current purpose (since DEC-012 the real name and the uploaded photo do have one: the consent-based reveal; the email is used only by the admin roster); whether to keep it for the ID-004 exchange or stop collecting it needs an owner decision.
 - **Depends on:** DEC-002, PRIV-006.
 - **Acceptance:** Every stored personal field maps to a documented purpose in the privacy notice; unused collection removed.
 - **Evidence:** Data inventory in privacy notice; code review.
@@ -446,6 +457,24 @@ Classification of what exists today. "Implemented — unverified" means the code
 - **Acceptance:** Exceeding the limit returns 429; limits documented.
 - **Evidence:** TEST-003.
 - **Risks:** Spam and harassment during peak event hours.
+
+#### NOTIF-001 — In-app new-message notifications
+- **Requirement (added 2026-10-14, maintainer instruction):** A signed-in user anywhere in the app is told when a message arrives in a chat they do not have open: a toast with the sender's nickname and the message, a short sound, a vibration, an unread count on that dancer's card and on the navbar, and a count in the tab title. It must use data the user is already allowed to read, and add no channel another user could listen on.
+- **Files:** `components/layout/MessageNotifier.tsx` (mounted in `app/(main)/layout.tsx`), `store/useAppStore.ts` (`unread`), `components/dashboard/Dashboard.tsx`, `components/layout/Navbar.tsx`, `components/chat/ChatRoom.tsx`.
+- **Status:** Implemented — unverified. Listens for `INSERT` on `messages` through Realtime postgres_changes, which row-level security limits to the user's own rooms; no broadcast channel was added (PRIV-005 is not made worse). Unread counts live in memory and reset on reload.
+- **Depends on:** SEC-003 (the `messages` read policy is what scopes delivery).
+- **Acceptance:** With two accounts: B on the dashboard receives a toast when A sends, and none for a chat B has open; a third account receives nothing.
+- **Evidence:** Manual two-account run (not yet done); TEST-005 for the policy.
+- **Risks:** Every signed-in tab holds an unfiltered postgres_changes subscription, so each inserted message costs one row-level-security check per online user. Fine for a single event; revisit before large audiences.
+
+#### NOTIF-002 — Web Push notifications
+- **Requirement (added 2026-10-14, maintainer instruction to use a service worker):** A user who has turned notifications on in a browser is notified of a new message when the app is in the background or closed. Push is optional: with no `VAPID_*` variables the app behaves as before. The notification carries the sender's public nickname and the room to open, never the message text, real name or email. The server posts only to known push-service hosts. A subscription belongs to whoever is signed in on that browser, and is dropped on sign-out, on turning notifications off, and when the push service reports it gone.
+- **Files:** `lib/push.ts`, `app/api/push/subscribe/route.ts`, `app/api/rooms/[roomId]/messages/route.ts`, `public/sw.js`, `lib/pushClient.ts`, `components/dashboard/NotificationToggle.tsx`, `supabase/migrations/0006_push_subscriptions.sql`.
+- **Status:** Implemented — unverified. Route and library behaviour is covered by tests with the push library and database mocked; nothing has been sent through a real push service, and migration 0006 has not been applied by this change.
+- **Depends on:** DATA-001 (migration 0006), SEC-001, SEC-002, SEC-004, PRIV-003; PRIV-004 for deletion (the foreign key cascades).
+- **Acceptance:** Tests: unauthenticated and malformed subscribe requests are refused; an endpoint outside the push services is refused and never posted to; a subscription is stored under the caller only; the payload has no message text; a 404/410 removes the subscription; a send failure never fails the message. Plus a two-device run: B, with the tab in the background, gets a system notification that opens the chat.
+- **Evidence:** `tests/push.test.ts` (38 tests), `tests/chat-expiry.test.ts` "notifies the partner, by nickname and room only…". Passed locally 2026-10-14; not yet run in CI. Two-device run: not yet done.
+- **Risks:** No per-user notification preferences beyond on/off, and no rate limit (CHAT-007), so a sender can trigger one notification per message (the same chat replaces its previous notification). iPhone Safari only delivers push to a site added to the home screen. Blocking (SAFE-001) does not exist yet, so a blocked sender cannot yet be silenced.
 
 ---
 
@@ -595,12 +624,30 @@ Everything in this section is **inactive until Paid Mode is effective** (CFG-002
 
 #### PAY-016 — Pre-checkout disclosure
 - **Requirement:** Before checkout, show the product, price, what exactly is delivered, the refund policy, and links to Terms/Privacy.
-- **Files:** `components/modals/ConnectModal.tsx` (replaced `ExtendModal.tsx` on 2026-10-14), `components/chat/TimerExpiredOverlay.tsx`.
-- **Status:** Partial. Since 2026-10-14 the sheet (`ConnectModal`) states the price, that the chat opens with no time limit as soon as the buyer pays, that the partner is asked to share contact details and nothing is shared unless they accept, that the buyer's own name and email are shared too, and that a decline or 24 hours of silence leaves the chat open with no refund; it links to `/refund-policy` in a new tab above the pay button. The sheet and the policy describe the same product (`tests/refund-policy.test.ts`). No Terms or Privacy links (none exist); no copy review.
+- **Files:** `components/modals/ConnectModal.tsx`, `components/modals/RevealModal.tsx`, `components/chat/TimerExpiredOverlay.tsx`.
+- **Status:** Partial. Since 2026-10-14 the connect sheet (`ConnectModal`) states the price, that the chat opens with no time limit as soon as the buyer pays, that the partner is asked to share contact details and nothing is shared unless they accept, that the buyer's own name and email are shared too, and that a decline or 24 hours of silence leaves the chat open with no refund; it links to `/refund-policy` in a new tab above the pay button. The reveal sheet (`RevealModal.tsx`, rebuilt 2026-10-14 for DEC-012) states what is and is not included (name/photo only, never email), and what happens if consent is withdrawn before the payment lands. No Terms or Privacy links; copy review pending.
 - **Depends on:** GATE-004, DEC-007.
 - **Acceptance:** Disclosure copy reviewed against GATE-004 policies.
 - **Evidence:** Screenshot + review record.
 - **Risks:** —
+
+#### PAY-017 — A paid reveal needs the other dancer's prior agreement
+- **Requirement (DEC-012, 2026-10-14):** The ₹29 reveal product shows the buyer the other dancer's real name and account photo, and nothing else (never an email). It can be ordered only while that dancer's request row is `allowed`, and it is granted only if the row is still `allowed` when the verified payment arrives (PAY-011). The product an order buys is fixed on the ledger when the order is created. A reveal order adds no chat time, and an extension order never reveals anyone.
+- **Files:** `app/api/payment/create-order/route.ts`, `lib/payments.ts` (`settlePayment`, `recordOrder`), `lib/reveal.ts`, `0008_reveal_requests.sql` (`payment_orders.product`).
+- **Status:** Verified (unit). Not run against a real database or Razorpay test mode. Migration 0008 has not been applied by this change; without it extension payments still work (an order row with no `product` is an extension) and reveal orders cannot be created.
+- **Depends on:** ID-001, ID-002, PAY-003, PAY-008, PAY-010, DATA-001.
+- **Acceptance:** Tests: order refused for no request, pending, declined, already revealed, the opposite direction, or an empty name; allowed → order recorded as `reveal` at the server price; verify and webhook each reveal, and together reveal once; consent gone at payment time → nothing revealed, order `fulfilment_failed`; a second payment for the same pair reveals nothing more; forged, uncaptured, foreign-user and billing-off payments reveal nothing.
+- **Evidence:** `tests/payment-routes.test.ts` "Paid Mode: paying to see a name and photo" (20 tests). Passed locally 2026-10-14; not yet run in CI.
+- **Risks:** No refund path for a `fulfilment_failed` reveal order (PAY-012, DEC-007). Razorpay's permission for this product is not established (GATE-003), and the legal review covers it (GATE-008).
+
+#### PAY-018 — A paid extension delivers its full time
+- **Requirement (added 2026-10-14 after a defect found in a Razorpay test-mode run):** An extension gives the chat the full time bought. Paid for while time remains, it lengthens the chat by that much. Paid for after the chat has closed, it runs from the moment it was paid for, so time the chat sat closed, or the checkout took, is not deducted. Later extensions stack from wherever the chat's end then stands. The server decides; the client only displays it.
+- **Files:** `lib/room.ts` (`effectiveExtraSeconds`), `lib/server.ts` (`extraSecondsFor`, now reading `chat_extensions.paid_at`), `app/api/rooms/[roomId]/messages/route.ts`, `hooks/useChatTimer.ts` (progress bar measured against one free-chat window).
+- **Status:** Verified (unit). The defect: extension seconds were added to the chat's length counted from the clock's first start, so a payment made more than two minutes after expiry was recorded as paid, showed "+2 minutes added", and left the chat closed. Not yet re-run in Razorpay test mode.
+- **Depends on:** PAY-003, CORE-003.
+- **Acceptance:** Tests: in-time extension adds exactly the bought time; late extension ends the chat that long after the payment; stacking and row order; before the clock starts; a message is accepted after a late payment and refused once that time has run out.
+- **Evidence:** `tests/extension-time.test.ts` (12 tests). Passed locally 2026-10-14; not yet run in CI.
+- **Risks:** `paid_at` is the server time at fulfilment, so the few seconds between the grant and the buyer's screen refreshing still count. An extension paid for before this fix is evaluated by the new rule from its own `paid_at`, which for old ones is long past.
 
 ---
 
@@ -662,12 +709,12 @@ Razorpay onboarding and product eligibility are **unresolved**. The ability to c
 - **Risks:** —
 
 #### PRIV-001 — Real name and email private by default
-- **Requirement:** `real_name` and `email` are never returned to anyone except the user themself, and to another participant only via ID-001 consent.
-- **Files:** `lib/consent.ts` (`getRevealedContact`, `getConnections`), `app/api/users/[userId]/contact/route.ts`, `app/api/reveals/route.ts`, `lib/server.ts` (`getRoomState`), `supabase/migrations/0001_init.sql` (`users` policy), `0006_contact_consent.sql`.
-- **Status:** Verified (unit, mocked database). Since 2026-10-14 `getRevealed` is gone and nothing reads the old `reveals` table (DEC-003). `real_name` and `email` of another person are read in one place, `getRevealedContact` (`lib/consent.ts`), and only when a `contact_reveals` row exists for exactly that pair; `GET /api/users/[userId]/contact` returns 404 otherwise. The `users` table still has only its "read own row" policy: no policy was added for other users, because RLS cannot restrict columns. Not covered: a test against a real database with real RLS.
+- **Requirement:** `real_name` and `email` are never returned to anyone except the user themself, and to another participant only via ID-001 consent. **Admin exception (DEC-011, 2026-10-14):** an admin (ADMIN-001) may see them in the admin roster for moderation; each view is recorded first (ADMIN-003), and they are never sent to any non-admin.
+- **Files:** `lib/consent.ts` (`getRevealedContact`, `getConnections`), `lib/reveal.ts` (`getRevealed`, `listRevealed`), `app/api/users/[userId]/contact/route.ts`, `app/api/reveals/route.ts`, `lib/server.ts` (`getRoomState`), `app/admin/users/page.tsx`, `supabase/migrations/0001_init.sql`, `0006_contact_consent.sql`, `0008_reveal_requests.sql`.
+- **Status:** Verified (unit, mocked database). The old `reveals` rows created by payment alone are no longer read (DEC-003). `real_name` and `email` of another person are read via `getRevealedContact` (`lib/consent.ts`) only when a `contact_reveals` row exists for that pair. In the reveal flow (`lib/reveal.ts`), only `real_name` and photo are revealed via an allowed `reveal_requests` row with verified payment, and email is never shared. Roster access for moderation is gated to admins and audited.
 - **Depends on:** ID-001.
 - **Acceptance:** Test: user B's `real_name`/`email` never appear in any response to user A unless B consented to share with A.
-- **Evidence:** `tests/consent-flow.test.ts` (404 for both before a request, after payment, after a decline and after expiry; the two fields for each of the pair after acceptance; 404 for anyone else; no private field in the room state; old `reveals` rows never read), `tests/campus-privacy.test.ts` (never `instagram_handle`; no `users` read without a reveal row). Passed locally 2026-10-14; a mutation that skipped the reveal check made 11 tests fail. RLS on the new tables was exercised once in Postgres (see ID-001).
+- **Evidence:** `tests/consent-flow.test.ts`, `tests/campus-privacy.test.ts`, `tests/reveal.test.ts`, `tests/admin.test.ts`.
 - **Risks:** **Critical.** See §17 R-1.
 
 #### PRIV-002 — No IDOR through room, user or payment ids
@@ -709,8 +756,8 @@ Razorpay onboarding and product eligibility are **unresolved**. The ability to c
 #### PRIV-006 — Truthful privacy and payment claims
 - **Requirement:** In-app and marketing copy must match actual behaviour. Fabricated statistics and testimonials must not be presented as real.
 - **Files:** `OnboardingModal.tsx:90` ("Your real name stays private") vs paid reveal; `HeroSection.tsx` (said "until someone pays to ask for it"; that line was removed when the hero copy was rewritten on 2026-10-14); `Testimonials.tsx:7-14` (invented users, including a privacy claim the app does not honour); `StatsCounter.tsx:7-11` ("5000+ Dancers", "200+ Events"); `README.md` described the paid reveal as intended behaviour until it was rewritten on 2026-10-13 (it now states the Free Mode default and lists the reveal code as pending removal); the in-app and landing copy are unchanged.
-- **Status:** Conflicts. Added 2026-10-14: `app/(main)/refund-policy/page.tsx` says ₹29 unlocks contact exchange and unlimited chat (DEC-002 revision), while a payment grants +2 minutes and the checkout sheet says so; onboarding still says "Paying never unlocks them". Removed the same day: the `FeaturesReveal` paid-unlock card. Resolved later that day: the refund policy, the checkout sheet, the expiry overlay and the onboarding note now describe what the code does (`tests/refund-policy.test.ts`, `tests/smoke/free-mode.test.ts`). Still conflicting: the invented statistics and testimonials, and `StatsCounter`'s "₹29 Unlock".
-- **Depends on:** DEC-002, DEC-008.
+- **Status:** Conflicts. In-app copy brought in line 2026-10-14: onboarding describes that names are shown only if asked and agreed, and paying alone never unlocks them. Refund policy, checkout sheets, and expiry overlay describe what the code does (`tests/refund-policy.test.ts`, `tests/smoke/free-mode.test.ts`). Still conflicting: landing page stats and testimonials (DEC-008), `FeaturesReveal`, `StatsCounter`.
+- **Depends on:** DEC-002, DEC-012, DEC-008.
 - **Acceptance:** Copy review sign-off; every factual claim has a source or is removed.
 - **Evidence:** Review record.
 - **Risks:** Consumer-protection and misleading-advertising exposure; user trust.
@@ -722,35 +769,41 @@ Razorpay onboarding and product eligibility are **unresolved**. The ability to c
 #### ID-001 — Disclosure only with the disclosed person's explicit consent
 - **Requirement:** A participant's identity/contact details are shown to another participant only after the disclosed person explicitly, specifically, and freely consents to share *those fields* with *that participant*. The request and the consent are separate actions by different people. Default is no sharing.
 - **Why:** Core safety and privacy commitment; likely a legal requirement (GATE-008).
-- **Files:** `supabase/migrations/0006_contact_consent.sql`, `lib/consent.ts`, `app/api/rooms/[roomId]/consent/route.ts`, `components/chat/ConsentBanner.tsx`, `components/chat/RevealCard.tsx`.
-- **Status:** Partial. Built 2026-10-14: a request (`contact_consents`, created only by a captured payment) and the consent (the other person's answer) are separate actions by different people. The server lets only the person who was asked answer, and acceptance runs `accept_contact_consent`, one transaction that marks the request accepted and writes the `contact_reveals` row. It no longer touches `rooms.unlimited`, which the payment sets (DEC-002, second revision). Before that row exists nothing is disclosed to anyone. The prompt names the fields and the recipient. Gaps: the fields are fixed (real name and email), not chosen (ID-003); the person is asked after someone has paid, which bears on "freely" (GATE-008); no test against a real database in CI; nothing has been applied to any database.
-- **Depends on:** DEC-002, DEC-003.
-- **Acceptance:** Tests: request without consent → nothing disclosed; consent by A for B → only B sees A's chosen fields; consent cannot be created by the requester or by the payment flow.
-- **Evidence:** TEST-003 — `tests/consent-flow.test.ts` (the payer cannot accept their own request; an outsider cannot; payment alone discloses nothing; accept discloses to the pair only; decline and expiry disclose nothing), `tests/payment-routes.test.ts` "a payment unlocks the chat but reveals nothing". Passed locally 2026-10-14 with a mocked database. Recorded run, not reproducible from the repository: on 2026-10-14 migrations 0001–0006 were executed in PGlite 0.5.9 (Postgres in WASM), and again after the second revision with 55 checks passing, including that a forced failure while `accept_contact_consent` writes the reveal leaves the request pending with no reveal row, that no answer changes `rooms.unlimited` or the order, the unique and foreign-key constraints, RLS for `anon` and `authenticated` on the new tables, and that those roles cannot execute the three functions. The script is not in the repository; adding it as a test needs a dev dependency.
+- **Files:** `lib/consent.ts`, `app/api/rooms/[roomId]/consent/route.ts`, `components/chat/ConsentBanner.tsx`, `components/chat/RevealCard.tsx`, `0006_contact_consent.sql`; `lib/reveal.ts`, `app/api/rooms/[roomId]/reveal/route.ts`, `components/chat/RevealPanel.tsx`, `0008_reveal_requests.sql`.
+- **Status:** Verified (unit, mocked database). Both flows enforce explicit consent:
+  - **Connect Flow (DEC-002):** A request (`contact_consents`, created only by payment) and consent (partner's answer via `accept_contact_consent`) are separate actions by different people. Acceptance discloses real name and email to the pair.
+  - **Reveal Flow (DEC-012):** One `reveal_requests` row per ordered pair: requester asks for free, only the partner can allow or decline, and requester sees partner's name and photo only once allowed and completed by verified payment. Email is never shared.
+  The old payer-only `reveals` table is no longer read by any code (DEC-003).
+- **Depends on:** DEC-002, DEC-012, DEC-003, DATA-001.
+- **Acceptance:** Tests: request without consent → nothing disclosed; consent by A for B → only B sees A's chosen fields; consent cannot be created by the requester or by the payment flow alone.
+- **Evidence:** `tests/consent-flow.test.ts`, `tests/reveal.test.ts`, `tests/payment-routes.test.ts`.
 - **Risks:** —
 
 #### ID-002 — Consent independent of payment
-- **Requirement:** No payment, entitlement, or webhook can create, imply or substitute for consent. Per DEC-002 there is no paid identity product; introducing one would require a new owner decision recorded here, and it could never itself disclose without consent.
-- **Files:** `lib/payments.ts`, `create-order/route.ts`, `verify/route.ts` (reveal branches removed 2026-10-14).
-- **Status:** Verified (unit). No payment path creates a `reveals` row or returns identity: `create-order` refuses `type: 'reveal'`, and `verify` returns only `{ verified }`. Identities from pre-existing `reveals` rows are a PRIV-001 / DEC-003 matter. The owner decision this requirement asks for was recorded on 2026-10-14 (DEC-002 revision) and the product was built that day. A captured payment sets `rooms.unlimited` and creates a pending `contact_consents` row. It discloses nothing: no `contact_reveals` row and no read of the `users` table, and `verify` still returns only `{ verified }`. Disclosure needs the other person's acceptance (ID-001).
-- **Depends on:** DEC-002.
+- **Requirement:** No payment, entitlement, or webhook can create, imply or substitute for consent. A payment can only complete a disclosure the disclosed person has already agreed to, or unlock chat time while leaving consent pending with the partner.
+- **Files:** `lib/payments.ts` (`settlePayment`), `lib/reveal.ts` (`grantReveal`, `isRevealAllowed`), `lib/consent.ts`, `create-order/route.ts`, `verify/route.ts`.
+- **Status:** Verified (unit). In the connect flow, payment makes the chat unlimited but discloses nothing without partner acceptance (`contact_consents` is pending; no `contact_reveals` row). In the reveal flow, `create-order` refuses a reveal order unless the partner already allowed it; fulfilment re-checks that at payment time and reveals nothing if consent was withdrawn. In both flows, `verify` returns only `{ verified }`.
+- **Depends on:** DEC-002, DEC-012.
 - **Acceptance:** Test: completed payment with no consent → no identity in any response.
-- **Evidence:** TEST-004 — `tests/payment-routes.test.ts` "a payment unlocks the chat but reveals nothing: only the partner's answer can", "refuses the old payer-only reveal"; `tests/consent-flow.test.ts` "paying does not reveal anything", "the person who paid cannot accept their own request". Passed locally 2026-10-14 (mocked database); a mutation that made the payment path write a reveal row made 15 tests fail.
+- **Evidence:** TEST-004 — `tests/payment-routes.test.ts`, `tests/consent-flow.test.ts`, `tests/reveal.test.ts`, `tests/smoke/free-mode.test.ts`.
 - **Risks:** —
 
 #### ID-003 — Informed, scoped, revocable consent
 - **Requirement:** The consent screen states exactly which fields, to whom, and that it cannot be un-seen once shown; the user can choose what to share (e.g. a contact handle instead of email); future access can be revoked; consent events are recorded.
-- **Files:** none.
-- **Status:** Partial. Since 2026-10-14 the prompt states which fields (real name and email) and to whom, and the answer is recorded with timestamps (`contact_consents.responded_at`, `contact_reveals.revealed_at`). **Open gaps, by owner instruction of 2026-10-14 not built now:** no revocation (the instruction was "stored permanently"; whether that is acceptable is a GATE-008 question), no choice of fields (for example a handle instead of email), and the prompt does not say that what is shown cannot be un-seen.
-- **Depends on:** DEC-002.
+- **Files:** `components/chat/ConsentBanner.tsx`, `components/chat/RevealPanel.tsx`, `lib/reveal.ts`, `0006_contact_consent.sql`, `0008_reveal_requests.sql`.
+- **Status:** Partial. The connect banner states fields (real name and email) and timestamps are recorded. The reveal panel states who is asking, exactly what would be shared (real name and photo), that email is not shared, and allows or declines. Gaps: no field-level picking, and revocation after reveal not yet implemented.
+- **Depends on:** DEC-002, DEC-012.
 - **Acceptance:** UX review + data model holds field-level consent with timestamps.
-- **Evidence:** Review record; TEST-003.
+- **Evidence:** Review record; `tests/reveal.test.ts`; `tests/smoke/free-mode.test.ts`.
 - **Risks:** —
 
 #### ID-004 — Mutual-exchange option
-- **Requirement (DEC-002 decided 2026-10-13):** Each participant chooses which fields to share (e.g. name, or a contact handle instead of email). Nothing is shown to either side until both have opted in; then each sees only what the other chose. Opting in is free, and no paid product discloses identity.
-- **Files:** replaces the payer-only `reveals`/`getRevealed` flow (`lib/server.ts:88-105`, `lib/payments.ts:37-49`).
-- **Status:** Partial, in a different shape from the requirement. Since 2026-10-14 the exchange is mutual in effect (on acceptance each sees the other's real name and email, and neither sees anything before it), but it is asymmetric in how it starts: one person pays to ask and the other accepts. There is no field-level choice (ID-003) and no free opt-in (FREE-006 retired). The requirement text above predates the DEC-002 revision and should be rewritten by the owner to match.
+- **Requirement (DEC-002 decided 2026-10-13):** Each participant chooses which fields to share. Nothing is shown to either side until both have opted in; then each sees only what the other chose.
+- **Files:** `lib/consent.ts`, `components/chat/ConsentBanner.tsx`, `components/chat/RevealCard.tsx`.
+- **Status:** Partial. Under the connect flow (DEC-002 revision), the exchange is mutual in effect: on acceptance, each participant sees the other's real name and email, and neither sees anything before that. Alongside it, the one-way paid name-and-photo reveal (DEC-012) exists.
+- **Depends on:** ID-001, ID-003, DATA-001; DEC-003 for existing `reveals` rows.
+- **Acceptance:** Tests: A opts in, B has not → neither sees anything; both opt in → each sees only the other's chosen fields; a third user and the payment flow cannot create or read an opt-in.
+- **Evidence:** `tests/consent-flow.test.ts`.
 - **Depends on:** ID-001, ID-003, DATA-001; DEC-003 for existing `reveals` rows.
 - **Acceptance:** Tests: A opts in, B has not → neither sees anything; both opt in → each sees only the other's chosen fields; a third user and the payment flow cannot create or read an opt-in.
 - **Evidence:** TEST-003.
@@ -767,8 +820,8 @@ Razorpay onboarding and product eligibility are **unresolved**. The ability to c
 
 #### SAFE-002 — Reporting and response
 - **Requirement:** A user can report a participant/conversation; reports are stored with the relevant messages; an owner reviews them; actions (warn, suspend, remove) exist and are recorded.
-- **Files:** none.
-- **Status:** Missing.
+- **Files:** `app/admin/*`, `lib/admin.ts` (actions only).
+- **Status:** Partial. Since 2026-10-14 an admin can remove a dancer, remove and block one, or remove a room, and each is recorded (ADMIN-002, ADMIN-003). Still missing: any way for a user to report, a review queue, warn/suspend, and a response-time target.
 - **Depends on:** DATA-001, DEC-006 (retention of reported content).
 - **Acceptance:** Report flow end-to-end; documented response time target.
 - **Evidence:** Test + runbook.
@@ -790,6 +843,33 @@ Razorpay onboarding and product eligibility are **unresolved**. The ability to c
 - **Acceptance:** Covered by referenced objectives.
 - **Evidence:** Referenced tests.
 - **Risks:** —
+
+#### ADMIN-001 — Admin console access
+- **Requirement (DEC-011, 2026-10-14):** The admin console at `/admin` is reachable only by a Clerk account whose **public metadata** has `role: "admin"`, set in the Clerk dashboard. Public metadata can be written only from the dashboard or the Backend API; `unsafeMetadata`, which a user can edit, must never be consulted. No account has the role by default, so nobody is an admin until one is marked. The check runs on the server in the layout, in every admin page and in every admin action. A signed-in non-admin gets a 404; no admin data or admin markup is ever sent to a non-admin.
+- **Files:** `lib/admin.ts` (`requireAdmin`, `isAdminUser`), `app/admin/layout.tsx`, `app/admin/**/page.tsx`, `app/admin/actions.ts`, `middleware.ts`.
+- **Status:** Implemented — unverified. Unit and action tests pass; a signed-out request to `/admin`, `/admin/users` and `/admin/rooms` returned 404 with no admin content against a local dev server on 2026-10-14. Not exercised with a real admin sign-in.
+- **Depends on:** AUTH-001; access to the Clerk dashboard being limited to people who may appoint admins.
+- **Acceptance:** Tests: only the exact role `admin` in public metadata is accepted; a role in `unsafeMetadata` is ignored; each page and action refuses a non-admin before any database or Clerk call. Plus a signed-in run as admin and as a normal user.
+- **Evidence:** `tests/admin.test.ts` ("who is an admin", "requireAdmin", "admin actions refuse everyone else…"). Passed locally 2026-10-14; not yet run in CI. Signed-in run: not yet done.
+- **Risks:** Anyone with access to the Clerk dashboard or the Clerk secret key can make an admin. There is one role: every admin can do everything the console offers. Public metadata is readable in that user's own browser, so an admin's role is visible to that admin (not to other users).
+
+#### ADMIN-002 — Admin removal actions
+- **Requirement (DEC-011, 2026-10-14):** An admin can remove a dancer (profile, every room they are in with its messages and extensions, reveals involving them, push subscriptions), remove and block a dancer (the same, and the Clerk account is banned so they cannot sign in), and remove a single room. Payment ledger rows are never deleted (PRIV-004). An admin cannot remove their own account. Inputs are validated before use, and each action asks for confirmation in the UI.
+- **Files:** `app/admin/actions.ts`, `app/admin/users/page.tsx`, `app/admin/rooms/page.tsx`, `components/admin/*`.
+- **Status:** Implemented — unverified. Tested with Clerk and the database mocked; nothing has been run against a real database or Clerk instance.
+- **Depends on:** ADMIN-001, ADMIN-003, SEC-004.
+- **Acceptance:** Tests: deletes happen in order and only for the target; the ledger is untouched; a failed Clerk ban deletes nothing; malformed ids change nothing; self-removal is refused. Plus a run against a test database.
+- **Evidence:** `tests/admin.test.ts` ("removeUser", "removeRoom"). Passed locally 2026-10-14; not yet run in CI.
+- **Risks:** Removal is immediate and cannot be undone. Without the block, a removed dancer can sign in and onboard again. Unblocking is done in the Clerk dashboard; the console has no unblock. Removing a room also clears its clock, so the pair get a fresh two minutes (CHAT-004). The deletes are separate statements, not one transaction, so a failure part-way leaves a partial removal (the action then reports an error). The other dancer in a removed chat loses that conversation too.
+
+#### ADMIN-003 — Admin audit log
+- **Requirement (DEC-011, 2026-10-14):** Every opening of the dancer roster and every removal is recorded in `admin_actions` (admin, action, target, time) *before* it happens. If the record cannot be written, the roster is not shown and the removal does not run. The log holds ids only, never names, emails or message text.
+- **Files:** `lib/admin.ts` (`recordAdminAction`), `supabase/migrations/0007_admin_actions.sql`, `app/admin/page.tsx` (recent activity).
+- **Status:** Implemented — unverified. Migration 0007 has not been applied by this change.
+- **Depends on:** DATA-001.
+- **Acceptance:** Tests: the audit row is the first database operation of every action; with the table missing nothing is deleted and no Clerk call is made.
+- **Evidence:** `tests/admin.test.ts` ("records the action first…", "does nothing at all if the audit row cannot be written", "does not delete if the audit row cannot be written"). Passed locally 2026-10-14.
+- **Risks:** The row records that an action was started; if a later step fails the row remains. Anyone with the service-role key or database access can still edit the log. No retention period is set (DEC-006).
 
 ---
 
@@ -931,7 +1011,7 @@ A phase is complete only when its exit criteria have **evidence**; planning or d
 
 | ID | Risk | Severity | Objective |
 |---|---|---|---|
-| **R-1** | Paying ₹29 discloses another user's real name and email without their consent, while onboarding promises the name stays private. | Critical | PRIV-001, ID-001, ID-002, PRIV-006 |
+| **R-1** | Paying ₹29 discloses another user's real name and email without their consent, while onboarding promises the name stays private. *Closed in code 2026-10-14 (DEC-012):* a name and photo are shown only after the named person allowed that requester, email is never shown, and the onboarding text says so. Old `reveals` rows are no longer read. Remaining: whether live payments were ever taken for them (DEC-003). | Critical → Low | PRIV-001, ID-001, ID-002, PRIV-006 |
 | **R-2** | A second paid reveal for the same pair is captured but leaves no record (`ignoreDuplicates`). *Resolved 2026-10-14: the paid reveal path is removed.* | High | PAY-008 |
 | **R-3** | Fulfilment failure (e.g. extension for a room with no row) leaves a paid customer unfulfilled with the webhook retrying indefinitely. | High | PAY-010 |
 | **R-4** | No payment ledger: no audit trail, no reconciliation, no failed/refunded state. *Partly mitigated 2026-10-14: `payment_orders` records created/paid/failed; still no event audit trail, reconciliation or refunded state.* | High | PAY-003, PAY-013 |
@@ -953,22 +1033,24 @@ Known limitations of the Free Mode gate, tracked here so they are not mistaken f
 |---|---|---|---|---|
 | **FU-001** | **Webhook event loss.** In any non-paid state a correctly signed webhook is acknowledged with 200 and only logged, not persisted, so Razorpay will not retry it. A genuine payment from an earlier Paid Mode period that needs fulfilment after a rollback could be missed; until a ledger exists the only trace is the server log line (subject to the host's log retention). | Highest | Durable payment ledger (PAY-003), persisted webhook events, and reconciliation against Razorpay (PAY-013) that can recover missed events, all before any paid transaction is accepted. The Paid Mode rollback rehearsal (OPS-005) must show no lost payment. *Progress 2026-10-14, still open:* the ledger exists (PAY-003) and webhook events handled in Paid Mode are persisted in `webhook_events` (PAY-008); an event received while billing is off is still only logged, and there is no reconciliation or rehearsal. | FREE-004, PAY-003, PAY-008, PAY-013, OPS-005 |
 | **FU-002** | **Environment detection.** The live-key rule uses `NODE_ENV === 'production'`, which is also true for preview deployments, so a preview could accept `rzp_live_` keys. | High | An explicit, trusted deployment-environment signal (e.g. a platform-set variable, once hosting is confirmed) that allows live keys only on the production deployment, with tests. | CFG-002, DEP-001 |
-| **FU-003** | **Identity disclosure.** *Done 2026-10-14:* the paid reveal purchase path is removed (button, `RevealModal`, `reveal` payment type, route and hook handling). *Still open:* identities from existing `reveals` rows are still displayed (`getRevealed`, `RevealCard`), including in Free Mode, which conflicts with DEC-002. *2026-10-14 merge of `origin/main`:* incoming work assumed the paid reveal still exists ("unlock for ₹29" copy in the dashboard and onboarding, Instagram handle added to the reveal). DEC-002 stands, so that copy was replaced with the existing "Paying never unlocks them" wording and the `getRevealed` change was not accepted; the collaborators need to be told. *Second merge, same day (`9533fae`, "unlock unlimited chat and real identity"):* the incoming change made every paid extension insert a `reveals` row for the payer (disclosing the partner's real name and email with no consent, against ID-001, ID-002, PRIV-001 and DEC-002), lifted the time limit for anyone holding a `reveals` row (CORE-003, CHAT-004), and advertised both in the expiry overlay and extend sheet. None of that was accepted: `lib/payments.ts`, the messages route and `ExtendModal.tsx` are unchanged, and the overlay lists only what a payment grants (+2 minutes). The confetti, the restyled overlay and `RevealCard`, and the dashboard header changes were merged. Reversing this needs a recorded owner decision, and ID-002 still rules out disclosure without the disclosed person's consent. *Later on 2026-10-14:* that decision was recorded (DEC-002 revision: paid mutual-consent contact exchange plus unlimited chat). It does not reinstate the `9533fae` behaviour, which disclosed with no consent. *Built the same day:* the consent model exists (ID-001), legacy `reveals` rows are no longer displayed (DEC-003), and PR #8's `/api/reveals` (merged from `origin/main` at `4f3c31d`, returning payer-only identities) was replaced with a consent-based route. **The collaborators must be told** that identity comes only from `contact_reveals`. Still open: whether live payments were ever taken for the old rows. | High | Remove the paid reveal path. Separately, first establish whether any live Razorpay payments were ever taken, then decide DEC-003 and handle historical records (stop display; refunds if needed). Do not delete records before that decision. | PRIV-001, ID-002, DEC-003  |
+| **FU-003** | **Identity disclosure.** *Done 2026-10-14:* the paid reveal purchase path without prior consent is removed. Legacy `reveals` rows are no longer read or displayed by any code (DEC-003). *Contact consent (DEC-002 revision):* one person pays ₹29 for unlimited chat and requests contact exchange; only if the partner accepts are real name and email shared (`contact_reveals`). *Reveal flow (DEC-012):* a paid reveal of name and photo exists, but only after the other dancer allows the request; email is never shared via this flow. Still open: whether live payments were ever taken for the old rows. | High | Remove any unconsented reveal paths. Separately, first establish whether any live Razorpay payments were ever taken, then decide DEC-003 and handle historical records. | PRIV-001, ID-002, DEC-003 |
 
 ### Decisions required
 
 | ID | Decision | Notes / recommendation |
 |---|---|---|
 | **DEC-001** | Free Mode chat expiry | **Decided 2026-10-13 (project owner):** free mutual extension, both must agree, +2 min (FREE-005). Still open: cap on free extensions per room; whether "both present" stays a timer-start condition (CHAT-003). |
-| **DEC-002** | Identity-sharing model | **Decided 2026-10-13 (project owner):** free, mutual, opt-in, field-level choice; never paid (FREE-006, ID-004). The paid "reveal" product is withdrawn. **Revised 2026-10-14 (explicit instruction from the repository user `sathvik-devadiga` in a coding session, after the conflict with the 2026-10-13 decision was put to them twice):** the paid product is ₹29 for contact exchange (real name and Gmail) with mutual consent, plus unlimited chat time with that partner, both granted together on a single payment. This supersedes "never paid" and "the paid reveal product is withdrawn". It does **not** relax consent: ID-001 is unchanged, details are disclosed only after both people have agreed, and a payment never creates, implies or substitutes for that agreement (ID-002). **Built later on 2026-10-14, on the same user's confirmed spec and answers:** one person pays ₹29 for a room; the captured payment creates a *pending* request (`contact_consents`) and nothing else; the other person is then asked. Accept: both see each other's real name and email and the room has no time limit. Decline, or no answer within 24 hours: nothing is shared and the buyer's order is queued for a manual refund. Answers given: pay-first is kept, accepting the refund load (the alternative of asking first and charging on accept was offered and declined); one payment by one person; after a decline the same person cannot ask again in that room, though the other person may; no contact exchange in Free Mode (FREE-006 retired); the paid 2-minute extension is retired (DEC-004); the fields are fixed at real name and email, labelled "Email" in the UI because it is not necessarily a Gmail address; consent is "stored permanently" with revocation recorded as an open gap under ID-003; legacy `reveals` rows are no longer displayed (DEC-003). Known tension, for GATE-008: the partner is asked after someone has already paid, which bears on "freely" in ID-001. Also subject to GATE-001/003 (Razorpay eligibility of this product) and GATE-008. **Revised again 2026-10-14 (user instruction; the earlier build was reported as a product bug):** the payment itself makes the room unlimited, at once (`settlePayment` sets `rooms.unlimited`); it still leaves a pending request, and the partner's answer now decides only whether contact details are shared. A decline, or 24 hours with no answer, leaves the chat unlimited and is **not** refunded. The only refund is a captured payment that did not unlock the chat (`fulfilment_failed`). `accept_contact_consent` no longer touches `rooms.unlimited`. Default chosen while building, for the owner to confirm or reverse: one payment per room, so `create-order` refuses a room that is already unlimited (otherwise the person who declined could pay ₹29 for a request alone, with nothing delivered and no refund if it is declined in turn). Consequence, recorded as R-13: unlimited chat no longer needs the other person's agreement, and there is no blocking or reporting. |
-| **DEC-003** | Treatment of existing `reveals` rows created without consent | **Decided 2026-10-14 (user instruction), display half:** stop displaying them and leave the table untouched. Done the same day: `getRevealed` was removed, no code reads `reveals`, and the incoming `/api/reveals` route from PR #8 (which returned those identities to the payer) was replaced with a consent-based one (`tests/consent-flow.test.ts` "old payer-only reveals rows"). Still open: whether any **live** payments were ever taken for them (*Information Required*), refunds if so, and whether to delete the rows. |
-| **DEC-004** | Extension rules: who may buy, before/after timer start, how many, does the partner need to agree | **Superseded 2026-10-14 (user instruction):** the paid 2-minute extension is retired; `create-order` refuses `type: 'extend'`. The only paid product is the connect request (DEC-002): either participant, at any time including after the chat has closed, once per person per room, one open request per room, and the partner must accept. Existing `chat_extensions` rows still count toward room time (FREE-007). Corrected later on 2026-10-14 (DEC-002, second revision): one payment per room, by either participant; the chat becomes unlimited without the partner's agreement; the partner's acceptance is needed only for contact details. |
+| **DEC-002** | Identity-sharing model | **Decided 2026-10-13 (project owner):** free, mutual, opt-in, field-level choice; never paid (FREE-006, ID-004). **Revised 2026-10-14 (user instruction):** paid connect flow for ₹29 unlocks unlimited chat and requests mutual contact exchange (real name and email); partner acceptance required. Superceded "never paid". Does not relax consent (ID-001, ID-002). **DEC-012 (2026-10-14):** one-way name-and-photo reveal for ₹29 after recipient allows. Both flows coexist. |
+| **DEC-003** | Treatment of existing `reveals` rows created without consent | **Decided 2026-10-14 (user instruction), display half:** stop displaying them and leave the table untouched. No code reads the legacy `reveals` table. Still open: whether any **live** payments were taken for them, refunds if so, and whether to delete rows. |
+| **DEC-004** | Extension rules: who may buy, before/after timer start, how many, does the partner need to agree | Connect flow: one payment per room unlocks unlimited chat. Paid extensions: delivery measured from when paid (PAY-018). |
 | **DEC-005** | Age policy | **Decided 2026-10-13 (project owner):** 18+ only, self-declaration at onboarding, no date of birth collected (SAFE-003). Subject to GATE-008 confirmation. |
 | **DEC-006** | Retention periods for messages, profiles and reports after the season | — |
 | **DEC-007** | Refund policy | **Decided 2026-10-14 (maintainer instruction):** no refunds once the paid chat extension has been delivered (digital, instant delivery); a full refund when a payment was deducted but the extension was not granted, on an email to `teamgarbaconnect@gmail.com` within 48 hours; payments are one-time, with no recurring charges. Published at `/refund-policy`. Revised later that day with the product (DEC-002): a full refund, made by the team within 48 hours without the buyer asking, when the partner declines or does not answer within 24 hours; no refund once the partner has accepted; a full refund on an email within 48 hours when the payment was taken but the request was not sent or accepted details were not shown; one-time payments only. The page and the checkout sheet state the same terms (`tests/refund-policy.test.ts`). Refunds are manual: orders in `refund_due` or `fulfilment_failed` (migration 0006 has the query). Not legally reviewed (GATE-004, GATE-008). Still open: recording a completed refund automatically (`refund.processed`, PAY-009). **Revised again 2026-10-14 (user instruction), superseding the terms above:** no refund once the unlimited chat is unlocked, including when the partner declines to share contact details or does not answer within 24 hours; a full refund, on an email within 48 hours, only when payment was deducted but the chat did not unlock. The page, the checkout sheet and the expiry overlay state this (`tests/refund-policy.test.ts`, `tests/smoke/free-mode.test.ts`). The refund queue is `payment_orders` in `fulfilment_failed`; there is no `refund_due` state any more. |
 | **DEC-008** | Landing stats and testimonials: replace with real data or remove | — |
 | **DEC-009** | Discovery scope: global list vs event-scoped; exposure of `last_seen`; gender filter | — |
-| **DEC-010** | Approved price and products (₹29 is a proposal) | Business decision after GATE-001/003. 2026-10-14: the product was stated as ₹29 for mutual-consent contact exchange plus unlimited chat (DEC-002 revision). Not approved for sale: GATE-001/003 are still outstanding and it is not built. Later on 2026-10-14 it was built as the connect request (pay ₹29, partner accepts or declines); still not approved for sale. |
+| **DEC-010** | Approved price and products (₹29 is a proposal) | Business decision after GATE-001/003. Products: ₹29 Connect (unlimited chat + mutual contact consent), ₹29 Reveal (name and photo reveal upon recipient allow). |
+| **DEC-011** | Admin access to user data | **Decided 2026-10-14 (maintainer instruction):** admins marked by `role: "admin"` in Clerk public metadata may see real names and emails in the roster and remove dancers and rooms; every view and action is audited (`ADMIN-001..003`). |
+| **DEC-012** | Paid name-and-photo reveal | **Decided 2026-10-14 (maintainer):** requester asks for free, partner allows or declines, and only after an allow can requester pay ₹29 to see name and photo. Email is never shared. (`PAY-017`, `ID-001`). |
 
 ### Information required
 
@@ -1008,7 +1090,7 @@ Status abbreviations: **V** Verified (scope in brackets, e.g. unit/route level) 
 | FREE-003 | No paid UI/claims | chat (done), landing (partly) | P | smoke (chat); `tests/refund-policy.test.ts` (`FeaturesReveal`) | `StatsCounter`, `Testimonials`, `ClosingCta` copy; policy-page rule | DEC-008, PRIV-006 |
 | FREE-004 | Billing endpoints inert; webhook grants only verified paid-era ledger orders | `app/api/payment/*`, webhook | P | `tests/payment-routes.test.ts`, smoke | Continuity path after ledger (FU-001) | PAY-003/006/011 |
 | FREE-005 | Free mutual +2 min extension at expiry | `ChatRoom.tsx` (interim closed panel) | M | smoke + `tests/chat-expiry.test.ts` (closed state only) | Build mutual-agreement flow | DATA-001; cap open |
-| FREE-006 | Free identity sharing via consent | — | Retired | — | Retired 2026-10-14: no contact exchange in Free Mode | DEC-002 |
+| FREE-006 | No identity sharing offered in Free Mode; free exchange unbuilt | `api/rooms/[roomId]/reveal`, `ChatRoom.tsx` | IU / Retired | `tests/reveal.test.ts`, smoke | Reveal flow gated to Paid Mode; free contact exchange retired | DEC-002, DEC-012 |
 | FREE-007 | Non-destructive switching | `extraSecondsFor`, `lib/consent.ts`, consent route | IU | `tests/smoke/free-mode.test.ts` (render only) | Mode-flip integration test | DEC-003 |
 | FREE-008 | Config ≠ approval | process | M | change record | Adopt §20 | GATE-* |
 | AUTH-001 | Auth on all surfaces | `middleware.ts`, `requireUserId` | IU | TEST-003 | Route-table test | — |
@@ -1023,6 +1105,8 @@ Status abbreviations: **V** Verified (scope in brackets, e.g. unit/route level) 
 | CHAT-005 | Reconnect resync | `useSupabaseRealtime.ts` | P | E2E/manual | Refetch on resubscribe | — |
 | CHAT-006 | Read receipts consistent | `read/route.ts` | P | review | Atomic append | — |
 | CHAT-007 | Rate limiting | — | M | TEST-003 | Choose mechanism | — |
+| NOTIF-001 | In-app message notifications | `MessageNotifier.tsx`, `useAppStore.ts` | IU | manual two-account run | Do the run; persist unread | SEC-003 |
+| NOTIF-002 | Web Push via service worker | `lib/push.ts`, `api/push/subscribe`, `public/sw.js`, `0006_push_subscriptions.sql` | IU | `tests/push.test.ts`, `tests/chat-expiry.test.ts` | Apply 0006, set `VAPID_*`, two-device run | DATA-001, CHAT-007, SAFE-001 |
 | PAY-001 | Mode-gated billing | payment routes, `ChatRoom.tsx` | P | `tests/payment-routes.test.ts` | Landing copy | FREE-003 |
 | PAY-002 | Server catalogue, amount+currency | `lib/room.ts:24`, `create-order`, `verify`, webhook | P | `tests/payment-routes.test.ts` (webhook and verify mismatch) | Catalogue; record anomalies | PAY-003 |
 | PAY-003 | Order/payment ledger | `0002_payment_orders.sql`, `0003_…webhook_events.sql`, `0006_contact_consent.sql`, `lib/payments.ts` | P | `tests/payment-routes.test.ts` | `fulfilled` state, automatic `refunded`, full audit table, apply migrations | DATA-001 |
@@ -1038,7 +1122,9 @@ Status abbreviations: **V** Verified (scope in brackets, e.g. unit/route level) 
 | PAY-013 | Reconciliation | — | M | report | Script | PAY-003 |
 | PAY-014 | Client never grants | `useRazorpay.ts`, `ChatRoom.tsx` | IU | TEST-004 | Write tests | — |
 | PAY-015 | Replay protection | `verify/route.ts`, ledger | V (unit) | `tests/payment-routes.test.ts` | Run in CI | PAY-003 |
-| PAY-016 | Pre-checkout disclosure | `ConnectModal.tsx`, `TimerExpiredOverlay.tsx` | P | `tests/refund-policy.test.ts`; review outstanding | Terms/Privacy links; copy review | GATE-004 |
+| PAY-016 | Pre-checkout disclosure | `ConnectModal.tsx`, `RevealModal.tsx`, `TimerExpiredOverlay.tsx` | P | `tests/refund-policy.test.ts`; review outstanding | Terms/Privacy links; copy review | GATE-004 |
+| PAY-017 | Paid reveal needs prior agreement | `create-order/route.ts`, `lib/payments.ts`, `lib/reveal.ts`, `0008_reveal_requests.sql` | V (unit) | `tests/payment-routes.test.ts` | Apply 0008; Razorpay test-mode run; refunds | ID-001/002, PAY-012, GATE-003 |
+| PAY-018 | Extension delivers its full time | `lib/room.ts`, `lib/server.ts`, `useChatTimer.ts` | V (unit) | `tests/extension-time.test.ts` | Re-run in Razorpay test mode | PAY-003, CORE-003 |
 | GATE-001…003 | Razorpay eligibility, KYC, use case | external | IR | written confirmation | Contact Razorpay | — |
 | GATE-004 | Policies published | `app/(main)/refund-policy/page.tsx` | P | live URLs (none yet); `tests/refund-policy.test.ts` | Terms, Privacy, cancellation; deploy; legal review | GATE-008 |
 | GATE-005 | Live creds/webhook config | external | IR | env audit | — | GATE-002 |
@@ -1049,21 +1135,24 @@ Status abbreviations: **V** Verified (scope in brackets, e.g. unit/route level) 
 | SEC-002 | AuthZ before service role | all `supabaseAdmin()` callers | IU | TEST-003 | Write tests | — |
 | SEC-003 | RLS correct | migration | IU | TEST-005 | Local Supabase tests | IR: live config |
 | SEC-004 | Input validation | route handlers, `actions.ts` | P | TEST-003 | Validate inputs; allow-list `branch`/`collegeYear`/`vibeTag` | — |
-| PRIV-001 | Name/email private | `lib/consent.ts` (`getRevealedContact`), contact route | V (unit) | `tests/consent-flow.test.ts`, `tests/campus-privacy.test.ts` | Real-database RLS test | ID-001 |
+| PRIV-001 | Name/email private (admin roster excepted, DEC-011) | `lib/consent.ts` (`getRevealedContact`), `lib/reveal.ts` (`getRevealed`, `listRevealed`), `app/admin/users/page.tsx` | V (unit) | `tests/consent-flow.test.ts`, `tests/campus-privacy.test.ts`, `tests/reveal.test.ts`, `tests/admin.test.ts` | Real-database RLS test | ID-001, DEC-011 |
 | PRIV-002 | No IDOR | `room.ts`, routes | IU | TEST-003/004 | Write tests | — |
 | PRIV-003 | No PII in logs | `lib/server.ts:23` | P | review | Sanitise | OPS-001 |
 | PRIV-004 | Deletion/retention | — | M | integration test | Design | DEC-006 |
 | PRIV-005 | Private Realtime channels | `useLobbyPresence.ts`, `useSupabaseRealtime.ts` | P | TEST-005 | Private channels + policy | DATA-001 |
 | PRIV-006 | Truthful claims | landing, onboarding, README | **C** | review | Fix copy | DEC-002/008 |
-| ID-001 | Consent before disclosure | `0006_contact_consent.sql`, `lib/consent.ts`, consent route | P | `tests/consent-flow.test.ts`; one recorded Postgres run | Real-database test in CI; apply migration; GATE-008 on pay-first | DEC-002 |
-| ID-002 | Consent ≠ payment | payment routes, `lib/payments.ts` | V (unit) | `tests/payment-routes.test.ts`, `tests/consent-flow.test.ts`, smoke | Run in CI | DEC-002 |
-| ID-003 | Informed, scoped, revocable | `ConsentBanner.tsx`, 0006 timestamps | P | review | Revocation (open gap); field choice; "cannot be un-seen" wording | DEC-002, GATE-008 |
-| ID-004 | Mutual, field-level opt-in exchange | `lib/consent.ts` | P | `tests/consent-flow.test.ts` | Rewrite requirement to the paid request model; field choice | ID-001, DEC-002 |
+| ID-001 | Consent before disclosure | `0006_contact_consent.sql`, `lib/consent.ts`, `lib/reveal.ts`, `0008_reveal_requests.sql` | V (unit) | `tests/consent-flow.test.ts`, `tests/reveal.test.ts`, `tests/payment-routes.test.ts` | Real-database test in CI; apply migrations | DEC-002, DEC-012 |
+| ID-002 | Consent ≠ payment | payment routes, `lib/payments.ts`, `lib/reveal.ts` | V (unit) | `tests/payment-routes.test.ts`, `tests/consent-flow.test.ts`, `tests/reveal.test.ts`, smoke | Run in CI | DEC-002, DEC-012 |
+| ID-003 | Informed, scoped, revocable | `ConsentBanner.tsx`, `RevealPanel.tsx`, 0006/0008 timestamps | P | review; smoke | Revocation (open gap); field choice | DEC-002, DEC-012 |
+| ID-004 | Mutual-exchange option | `lib/consent.ts` | P | `tests/consent-flow.test.ts` | Field choice; decide on ID-004 free mutual scope | ID-001, DEC-002 |
 | SAFE-001 | Blocking | — | M | TEST-003 | Build | DATA-001 |
-| SAFE-002 | Reporting | — | M | test + runbook | Build | DATA-001 |
+| SAFE-002 | Reporting | `app/admin/*` (removal actions only) | P | test + runbook | Build user reporting and a review queue | DATA-001 |
 | SAFE-003 | 18+ self-declaration at onboarding | `OnboardingModal.tsx`, `actions.ts` | M | TEST-003, TEST-007 | Build | DATA-001; GATE-008 |
 | SAFE-004 | Abuse prevention | — | M | refs | — | CHAT-004/007 |
-| DATA-001 | Migrations only | `supabase/migrations/` (0001–0006) | P | schema diff | Adopt CLI; apply 0006; README lists 0004–0006 | IR: live DB |
+| ADMIN-001 | Admin console access | `lib/admin.ts`, `app/admin/*`, `middleware.ts` | IU | `tests/admin.test.ts`; signed-out 404 probe | Signed-in run as admin and non-admin | AUTH-001, DEC-011 |
+| ADMIN-002 | Admin removal actions | `app/admin/actions.ts` | IU | `tests/admin.test.ts` | Run against a test database; unblock path | ADMIN-001/003, PRIV-004 |
+| ADMIN-003 | Admin audit log | `lib/admin.ts`, `0007_admin_actions.sql` | IU | `tests/admin.test.ts` | Apply 0007; set retention | DATA-001, DEC-006 |
+| DATA-001 | Migrations only | `supabase/migrations/` (0001–0008) | P | schema diff | Adopt CLI; apply 0006-0008; README lists all migrations | IR: live DB |
 | DATA-002 | Entitlement linkage | migration | P | TEST-005 | With PAY-003 | PAY-003 |
 | DATA-003 | User referential integrity | migration | P | integration | With PRIV-004 | PRIV-004 |
 | DATA-004 | Timer monotonic | `timer/route.ts:21` | IU | TEST-003 | Write test | — |

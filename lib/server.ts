@@ -3,7 +3,8 @@ import { auth } from '@clerk/nextjs/server';
 import { supabaseAdmin } from './supabaseAdmin';
 import { diagnoseDbError } from './dbDiagnosis';
 import { getRevealedContact, getRoomConsent, isMissingSchema } from './consent';
-import { FREE_CHAT_MS, partnerFromRoomId } from './room';
+import { FREE_CHAT_MS, effectiveExtraSeconds, partnerFromRoomId } from './room';
+import { getRevealState, getRevealed } from './reveal';
 import type { MyProfile, PublicProfile, RoomState } from './types';
 
 export const PUBLIC_COLUMNS = 'clerk_id, display_name, gender, last_seen';
@@ -133,10 +134,11 @@ async function findOrCreateRoom(roomId: string, participantIds: string[], column
   return { id: row.id, timer_started_at: row.timer_started_at, unlimited: row.unlimited === true };
 }
 
-export async function extraSecondsFor(roomId: string) {
-  const { data, error } = await supabaseAdmin().from('chat_extensions').select('extra_seconds').eq('room_id', roomId);
+/** Seconds the room's extensions add beyond the free time, measured from the clock's start (see effectiveExtraSeconds). */
+export async function extraSecondsFor(roomId: string, timerStartedAt: string | null) {
+  const { data, error } = await supabaseAdmin().from('chat_extensions').select('extra_seconds, paid_at').eq('room_id', roomId);
   if (error) throw error;
-  return (data ?? []).reduce((sum, r) => sum + (r.extra_seconds as number), 0);
+  return effectiveExtraSeconds(timerStartedAt, (data ?? []) as { extra_seconds: number; paid_at: string }[]);
 }
 
 /** A room that has been paid for is unlimited and never expires. */
@@ -147,18 +149,19 @@ export function isExpired(timerStartedAt: string | null, extraSeconds: number, u
 
 export async function getRoomState(roomId: string, userId: string): Promise<RoomState> {
   const { db, me, partner, partnerId, room } = await loadRoom(roomId, userId);
-  // `revealed` comes only from a contact_reveals row for this pair. Rows in the
-  // old payer-only `reveals` table are no longer read or shown (DEC-003).
-  const [{ data: messages, error }, extraSeconds, consent, revealed] = await Promise.all([
+  // `revealed` (contact flow) comes only from a contact_reveals row for this pair.
+  // Rows in the old payer-only `reveals` table are no longer read or shown (DEC-003).
+  const [{ data: messages, error }, extraSeconds, consent, revealed, reveal] = await Promise.all([
     db
       .from('messages')
       .select('id, room_id, sender_id, text, created_at, read_by')
       .eq('room_id', roomId)
       .order('created_at', { ascending: true })
       .limit(500),
-    extraSecondsFor(roomId),
+    extraSecondsFor(roomId, room.timer_started_at),
     getRoomConsent(roomId, userId),
     getRevealedContact(userId, partnerId),
+    getRevealState(userId, partnerId),
   ]);
   if (error) throw error;
   return {
@@ -171,5 +174,6 @@ export async function getRoomState(roomId: string, userId: string): Promise<Room
     unlimited: room.unlimited,
     consent,
     revealed,
+    reveal,
   };
 }

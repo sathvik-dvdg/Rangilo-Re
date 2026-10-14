@@ -92,6 +92,7 @@ describe('Campus Profiles & Privacy Rules', () => {
     });
   });
 
+  // What a dancer may see of another's identity in the name-and-photo reveal flow is tested in tests/reveal.test.ts.
   describe('Contact details after a mutual exchange (PRIV-001, ID-001)', () => {
     const revealRow = (data: unknown) => ({
       select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data, error: null }) }) }),

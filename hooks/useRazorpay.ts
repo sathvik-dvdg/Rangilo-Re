@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from 'react';
 import { isRecord } from '@/lib/utils';
+import type { PaymentType } from '@/lib/types';
 
 type RazorpayResponse = { razorpay_payment_id: string; razorpay_order_id: string; razorpay_signature: string };
 
@@ -110,16 +111,20 @@ export async function openCheckout({ orderId, amount, currency, keyId, descripti
 }
 
 /**
- * Pays ₹29 for unlimited chat in one room. The server creates the order (fixing the
- * amount and what it is for) and verifies the payment; the UI only changes
- * after the server says the payment is good. Paying also asks the partner to
- * share contact details; only their answer decides whether any are shared.
+ * Pays ₹29 for a product:
+ * - 'connect': makes the chat unlimited in one room and asks the partner to
+ *   share contact details. Only their answer decides whether any are shared.
+ * - 'extend': adds two more minutes to the chat.
+ * - 'reveal': shows the other dancer's real name and photo, once they agreed.
+ * The server creates the order (fixing the amount and what it buys) and
+ * verifies the signature; the UI only changes after the server says the
+ * payment is good.
  */
 export function useRazorpay() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const pay = useCallback(async (roomId: string, prefill?: { name?: string; email?: string }): Promise<boolean> => {
+  const pay = useCallback(async (roomId: string, type: PaymentType = 'connect', prefill?: { name?: string; email?: string }): Promise<boolean> => {
     setBusy(true);
     setError(null);
     const fail = (message: string) => {
@@ -133,7 +138,7 @@ export function useRazorpay() {
       const res = await fetch('/api/payment/create-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'connect', roomId }),
+        body: JSON.stringify({ type, roomId }),
       });
       order = await readJson(res);
       if (!res.ok) return fail(typeof order.error === 'string' ? order.error : 'Could not start payment.');
@@ -146,7 +151,11 @@ export function useRazorpay() {
       return fail('Could not start payment.');
     }
 
-    const result = await openCheckout({ orderId, amount, currency, keyId, description: 'Unlimited chat', prefill });
+    const description =
+      type === 'connect' ? 'Unlimited chat' :
+      type === 'reveal' ? 'See name and photo' :
+      'Extend Chat';
+    const result = await openCheckout({ orderId, amount, currency, keyId, description, prefill });
     if (!result.verified) return fail(result.error);
     setBusy(false);
     return true;

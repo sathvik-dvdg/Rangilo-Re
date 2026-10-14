@@ -3,7 +3,7 @@ const nextConfig = {
   reactStrictMode: true,
   transpilePackages: ['three'],
   experimental: {
-    serverComponentsExternalPackages: ['razorpay'],
+    serverComponentsExternalPackages: ['razorpay', 'web-push'],
   },
 };
 

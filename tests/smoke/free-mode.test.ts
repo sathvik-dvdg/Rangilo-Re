@@ -67,8 +67,14 @@ function roomState(timerStartedAt: string | null): RoomState {
     unlimited: false,
     consent: NO_REQUEST,
     revealed: null,
+    reveal: { outgoing: 'none', incoming: 'none', sharing: null },
   };
 }
+
+const bothSpoke = (at: string) => [
+  { id: 'm1', room_id: ROOM, sender_id: 'user_alice', text: 'Hi', created_at: at, read_by: ['user_alice', 'user_bob'] },
+  { id: 'm2', room_id: ROOM, sender_id: 'user_bob', text: 'Hello', created_at: at, read_by: ['user_bob'] },
+];
 
 async function renderChat() {
   const element = await ChatPage({ params: { roomId: encodeURIComponent(ROOM) } });
@@ -133,6 +139,22 @@ describe('Free Mode smoke (in-process, providers mocked)', () => {
     expect(html).not.toContain('<form');
     expect(html).not.toContain('aria-label="Message"');
     expect(html).toContain('That is me'); // the thread itself is still rendered
+  });
+
+  // Asking to see a name and photo is part of the paid feature, so none of it appears with billing off,
+  // whatever state a request is in.
+  it.each(['none', 'pending', 'allowed'] as const)('chat shows no name-and-photo request or offer (request state: %s)', async (state) => {
+    const now = new Date().toISOString();
+    room.state = {
+      ...roomState(now),
+      messages: bothSpoke(now),
+      reveal: { outgoing: state, incoming: state === 'none' ? 'none' : 'pending', sharing: state === 'none' ? null : { real_name: 'Avni Private', image_url: null } },
+    };
+    const html = await renderChat();
+    expect(html).not.toMatch(/Ask to see name/i);
+    expect(html).not.toMatch(/is asking to see your real name/i);
+    expect(html).not.toContain('Avni Private');
+    for (const pattern of PAYMENT_UI) expect(html).not.toMatch(pattern);
   });
 
   it('payment creation is refused before any database or Razorpay access', async () => {
@@ -204,6 +226,7 @@ describe('control: the same render in Paid Mode does show payment UI', () => {
     const html = await renderChat();
     expect(html).not.toMatch(/Reveal Identity/i);
     expect(html).not.toMatch(/Extend Chat/i);
+    expect(html).not.toMatch(/See them ₹29/);
     expect(html).toMatch(/Connect ₹29/);
     expect(html).toContain('Nothing is shared unless they accept');
     expect(html).toContain('the chat stays open and there is no refund');
@@ -229,5 +252,38 @@ describe('control: the same render in Paid Mode does show payment UI', () => {
             : 'so no details were shared. Your chat remains open.',
       );
     }
+  });
+
+  it('in Paid Mode a dancer can ask, and is offered the purchase only after the other dancer said yes', async () => {
+    vi.stubEnv('BILLING_MODE', 'paid');
+    const now = new Date().toISOString();
+    const withReveal = (reveal: RoomState['reveal']) => ({ ...roomState(now), messages: bothSpoke(now), reveal });
+
+    room.state = withReveal({ outgoing: 'none', incoming: 'none', sharing: null });
+    let html = await renderChat();
+    expect(html).toMatch(/Ask to see name &amp; photo/);
+    expect(html).not.toMatch(/See them ₹29/);
+
+    for (const outgoing of ['pending', 'declined'] as const) {
+      room.state = withReveal({ outgoing, incoming: 'none', sharing: null });
+      html = await renderChat();
+      expect(html).not.toMatch(/See them ₹29/);
+      expect(html).not.toMatch(/Ask to see name/);
+    }
+
+    room.state = withReveal({ outgoing: 'allowed', incoming: 'none', sharing: null });
+    expect(await renderChat()).toMatch(/See them ₹29/);
+  });
+
+  it('the dancer being asked sees what would be shared and can allow or decline', async () => {
+    vi.stubEnv('BILLING_MODE', 'paid');
+    const now = new Date().toISOString();
+    room.state = { ...roomState(now), messages: bothSpoke(now), reveal: { outgoing: 'none', incoming: 'pending', sharing: { real_name: 'Avni Private', image_url: null } } };
+    const html = await renderChat();
+    expect(html).toMatch(/is asking to see your real name and photo/);
+    expect(html).toContain('Avni Private');
+    expect(html).toMatch(/>Allow</);
+    expect(html).toMatch(/>Decline</);
+    expect(html).toMatch(/Your email is never shared/);
   });
 });

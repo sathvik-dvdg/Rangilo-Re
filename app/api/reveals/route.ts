@@ -1,22 +1,37 @@
 import { getConnections } from '@/lib/consent';
+import { listRevealed } from '@/lib/reveal';
 import { errorResponse, requireUserId } from '@/lib/server';
+import type { RevealedIdentity } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * For the dancer list: `revealed` holds the real name and email of everyone
- * the caller is connected with, and `incoming` the ids of dancers whose
- * connect request is waiting for the caller's answer.
+ * For the dancer list:
+ * - `revealed` holds the real name and contact details (email from connect flow,
+ *   photo from reveal flow) of everyone the caller may see.
+ * - `incoming` holds the ids of dancers whose connect request is waiting for the
+ *   caller's answer.
  *
- * Both come from the consent tables. A name appears only when a
- * contact_reveals row exists for the pair, which takes the other person's
- * acceptance; the old payer-only `reveals` table is not read (DEC-003).
+ * Both come from the consent and reveal tables. The old payer-only `reveals`
+ * table is not read (DEC-003).
  */
 export async function GET() {
   try {
     const userId = requireUserId();
-    return Response.json(await getConnections(userId), { headers: { 'Cache-Control': 'no-store' } });
+    const [revealList, connections] = await Promise.all([
+      listRevealed(userId),
+      getConnections(userId),
+    ]);
+    const revealed: Record<string, RevealedIdentity> = { ...connections.revealed };
+    for (const { clerk_id, ...identity } of revealList) {
+      revealed[clerk_id] = { ...revealed[clerk_id], ...identity };
+    }
+    return Response.json({
+      revealed,
+      incoming: connections.incoming,
+    }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (e) {
     return errorResponse(e);
   }
 }
+

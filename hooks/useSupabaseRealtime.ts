@@ -13,13 +13,15 @@ type Handlers = {
   onConsentChange: () => void;
   /** The room became unlimited (it was paid for). */
   onUnlimited: () => void;
+  /** A request to see a name and photo was made or answered. Row-level security only delivers the user's own. */
+  onRevealChange?: () => void;
 };
 
 /**
  * Subscribes to everything a chat room needs on one channel `room:<id>`:
  * message inserts/updates, the room row (timer start, unlimited), extensions,
- * connect requests, and presence so we know when both dancers have the room
- * open.
+ * connect requests, reveal requests, and presence so we know when both dancers
+ * have the room open.
  */
 export function useRoomRealtime(roomId: string, userId: string | null, handlers: Handlers) {
   const supabase = useSupabase();
@@ -43,13 +45,15 @@ export function useRoomRealtime(roomId: string, userId: string | null, handlers:
         if (room.timer_started_at) h.current.onTimerStart(room.timer_started_at);
         if (room.unlimited) h.current.onUnlimited();
       })
-      // RLS delivers these rows only to the requester and the person asked.
+      // RLS delivers these rows only to the requester and the person asked (contact-consent flow).
       .on('postgres_changes', { event: '*', schema: 'public', table: 'contact_consents', filter: `room_id=eq.${roomId}` }, () =>
         h.current.onConsentChange(),
       )
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_extensions', filter: `room_id=eq.${roomId}` }, (p) =>
         h.current.onExtension((p.new as { extra_seconds: number }).extra_seconds),
       )
+      // RLS delivers reveal_requests only to the two dancers involved (reveal flow).
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reveal_requests' }, () => h.current.onRevealChange?.())
       .on('presence', { event: 'sync' }, () => setPresentIds(Object.keys(channel.presenceState())))
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') await channel.track({ at: Date.now() });

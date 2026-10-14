@@ -1,6 +1,7 @@
 import 'server-only';
 import { supabaseAdmin } from './supabaseAdmin';
 import { partnerFromRoomId } from './room';
+import { grantReveal } from './reveal';
 import { isRecord } from './utils';
 import type { PaymentType } from './types';
 
@@ -14,8 +15,8 @@ import type { PaymentType } from './types';
  */
 
 /**
- * 'paid': captured, the chat is unlimited and the contact request exists.
- * 'fulfilment_failed': captured, but the chat could not be unlocked (PAY-010).
+ * 'paid': captured, the grant was applied (chat unlimited + contact request, or reveal granted).
+ * 'fulfilment_failed': captured, but the grant could not be applied (PAY-010).
  *   This is the only state that is owed a refund (PAY-012).
  * 'refunded': set by hand once the money has gone back.
  */
@@ -38,16 +39,26 @@ export type PaymentOrder = {
   status: PaymentOrderStatus;
   amount: number;
   currency: string;
+  /** What the order buys. Fixed when the order is created, never taken from a later request. */
+  product: PaymentType;
 };
 
 /** What create-order writes on the Razorpay order, for reading in their dashboard only. */
 export type OrderNotes = { type: PaymentType; userId: string; roomId: string };
 
-const ORDER_COLUMNS = 'id, user_id, room_id, order_id, payment_id, status, amount, currency';
+// Every column: `product` (migration 0008) may not exist yet, and a row without it is an extension.
+const ORDER_COLUMNS = 'id, user_id, room_id, order_id, payment_id, status, amount, currency, product';
+const EXTENSION_SECONDS = 120;
+
+// Postgres unique_violation: the room already has an open or accepted request (migration 0006).
+const UNIQUE_VIOLATION = '23505';
 
 function toPaymentOrder(row: unknown): PaymentOrder {
   if (isRecord(row)) {
     const { id, user_id, room_id, order_id, payment_id, status, amount, currency } = row;
+    // Default product: 'connect' for rows before the product column existed; 'extend' or 'reveal' when set.
+    const rawProduct = row.product;
+    const product: PaymentType = rawProduct === 'reveal' ? 'reveal' : rawProduct === 'extend' ? 'extend' : 'connect';
     if (
       typeof id === 'string' &&
       typeof user_id === 'string' &&
@@ -57,13 +68,13 @@ function toPaymentOrder(row: unknown): PaymentOrder {
       typeof amount === 'number' &&
       typeof currency === 'string'
     ) {
-      return { id, user_id, room_id, order_id, payment_id: typeof payment_id === 'string' ? payment_id : null, status, amount, currency };
+      return { id, user_id, room_id, order_id, payment_id: typeof payment_id === 'string' ? payment_id : null, status, amount, currency, product };
     }
   }
   throw new Error('Malformed payment_orders row');
 }
 
-export async function recordOrder(order: { userId: string; roomId: string; orderId: string; amount: number; currency: string }) {
+export async function recordOrder(order: { userId: string; roomId: string; orderId: string; amount: number; currency: string; product: PaymentType }) {
   const { error } = await supabaseAdmin().from('payment_orders').insert({
     user_id: order.userId,
     room_id: order.roomId,
@@ -71,6 +82,8 @@ export async function recordOrder(order: { userId: string; roomId: string; order
     status: 'created',
     amount: order.amount,
     currency: order.currency,
+    // 'connect' is the default; write the product explicitly for extend and reveal.
+    ...((order.product === 'extend' || order.product === 'reveal') ? { product: order.product } : {}),
   });
   if (error) throw error;
 }
@@ -84,37 +97,30 @@ export async function getOrder(orderId: string): Promise<PaymentOrder | null> {
 
 /**
  * A fulfilment failure that retrying cannot fix: the order's room is not one
- * the buyer is in, it no longer exists, or it has already been paid for.
+ * the buyer is in, it no longer exists, a duplicate connect request exists,
+ * or (for a reveal) the other dancer's agreement is not there.
  * Anything else thrown while settling (a database or network error) is
  * treated as temporary.
  */
 export class FulfilmentError extends Error {
-  constructor(public reason: 'bad_room' | 'room_not_found' | 'duplicate_request') {
+  constructor(public reason: 'bad_room' | 'room_not_found' | 'duplicate_request' | 'consent_missing') {
     super(`Fulfilment failed: ${reason}`);
   }
 }
 
-// Postgres foreign_key_violation: contact_consents.room_id has no rooms row.
+// Postgres foreign_key_violation: FK has no parent row.
 const FOREIGN_KEY_VIOLATION = '23503';
-// Postgres unique_violation: the room already has an open or accepted request,
-// or this buyer has already asked in it (the indexes in migration 0006).
-const UNIQUE_VIOLATION = '23505';
 
 /**
- * Grants what an order paid for and marks the order paid. A payment does two
- * things, in this order:
- *   1. asks the partner to exchange contact details: a 'pending' request,
- *      which discloses nothing. Only the partner's answer can (lib/consent.ts),
- *      so a payment never stands in for their consent (ID-002);
- *   2. makes the room unlimited, at once and whatever the partner answers.
+ * Grants what an order paid for and marks the order paid. Idempotent: a settled
+ * order is left alone.
  *
- * Idempotent: a settled order is left alone, the request is keyed on the
- * order, and setting the flag twice changes nothing, so the checkout handler
- * and the webhook (or a repeated webhook) grant once between them.
- *
- * The order is marked paid last, so a crash part-way is repaired by the next
- * delivery instead of leaving an order marked paid with the chat still
- * locked.
+ * 'connect' — makes the room unlimited immediately, then creates a pending
+ *   contact-consent request. The request discloses nothing; only the partner's
+ *   explicit answer does (ID-002, DEC-002).
+ * 'extend'  — adds two minutes to the room via chat_extensions.
+ * 'reveal'  — grants the reveal-request if (and only if) the partner's consent
+ *   still stands (ID-001, PAY-017).
  *
  * Throws FulfilmentError for a permanent failure. Routes call fulfilOrder,
  * which records that on the ledger.
@@ -130,23 +136,46 @@ export async function settlePayment(order: PaymentOrder, paymentId: string): Pro
   if (!partnerId) throw new FulfilmentError('bad_room');
 
   const db = supabaseAdmin();
-  const request = await db
-    .from('contact_consents')
-    .upsert(
-      { room_id: order.room_id, requester_id: order.user_id, partner_id: partnerId, payment_order_id: order.id },
-      { onConflict: 'payment_order_id', ignoreDuplicates: true },
-    );
-  if (request.error) {
-    if (request.error.code === FOREIGN_KEY_VIOLATION) throw new FulfilmentError('room_not_found');
-    if (request.error.code === UNIQUE_VIOLATION) throw new FulfilmentError('duplicate_request');
-    throw request.error;
-  }
 
-  // The buyer's part does not wait for the partner: the chat is unlimited from now on.
-  const unlocked = await db.from('rooms').update({ unlimited: true }).eq('id', order.room_id).select('id');
-  if (unlocked.error) throw unlocked.error;
-  // No row changed, so nothing was unlocked: never mark that paid.
-  if (!unlocked.data?.length) throw new FulfilmentError('room_not_found');
+  if (order.product === 'reveal') {
+    // Payment never stands in for consent (ID-002, PAY-011): the other dancer's yes is
+    // checked again now, and if it has gone the payer sees nothing and the order is kept
+    // for refund.
+    if ((await grantReveal(order.user_id, partnerId, paymentId)) === 'no_consent') throw new FulfilmentError('consent_missing');
+  } else if (order.product === 'connect') {
+    // The contact-consent request is keyed on the order id, so a crash between this
+    // write and marking the order paid is repaired by the next delivery.
+    const request = await db
+      .from('contact_consents')
+      .upsert(
+        { room_id: order.room_id, requester_id: order.user_id, partner_id: partnerId, payment_order_id: order.id },
+        { onConflict: 'payment_order_id', ignoreDuplicates: true },
+      );
+    if (request.error) {
+      if (request.error.code === FOREIGN_KEY_VIOLATION) throw new FulfilmentError('room_not_found');
+      if (request.error.code === UNIQUE_VIOLATION) throw new FulfilmentError('duplicate_request');
+      throw request.error;
+    }
+    // The buyer's part does not wait for the partner: the chat is unlimited from now on.
+    const unlocked = await db.from('rooms').update({ unlimited: true }).eq('id', order.room_id).select('id');
+    if (unlocked.error) throw unlocked.error;
+    if (!unlocked.data?.length) throw new FulfilmentError('room_not_found');
+  } else {
+    // 'extend': add two minutes via chat_extensions.
+    const grant = await db.from('chat_extensions').upsert(
+      {
+        room_id: order.room_id,
+        payment_id: paymentId,
+        extra_seconds: EXTENSION_SECONDS,
+        paid_at: new Date().toISOString(),
+      },
+      { onConflict: 'payment_id', ignoreDuplicates: true },
+    );
+    if (grant.error) {
+      if (grant.error.code === FOREIGN_KEY_VIOLATION) throw new FulfilmentError('room_not_found');
+      throw grant.error;
+    }
+  }
 
   const paid = await db
     .from('payment_orders')
@@ -162,8 +191,7 @@ export async function settlePayment(order: PaymentOrder, paymentId: string): Pro
  * A permanent failure leaves the order `fulfilment_failed` for review and
  * refund and is returned, not thrown, so the webhook can acknowledge it and
  * Razorpay stops retrying. A temporary failure still throws, so the caller
- * answers 5xx and the next delivery tries again. An order left
- * `fulfilment_failed` is settled by a later delivery if the cause has gone.
+ * answers 5xx and the next delivery tries again.
  */
 export async function fulfilOrder(order: PaymentOrder, paymentId: string): Promise<'fulfilled' | 'already_processed' | 'fulfilment_failed'> {
   try {
@@ -177,7 +205,7 @@ export async function fulfilOrder(order: PaymentOrder, paymentId: string): Promi
       .in('status', UNSETTLED);
     if (error) throw error;
     // The only alert there is until OPS-003 exists. Ids only, no personal data.
-    console.error('[billing] fulfilment_failed: payment captured but the chat was not unlocked; refund due', {
+    console.error('[billing] fulfilment_failed: payment captured but nothing granted; review for refund', {
       orderId: order.order_id,
       paymentId,
       reason: e.reason,
