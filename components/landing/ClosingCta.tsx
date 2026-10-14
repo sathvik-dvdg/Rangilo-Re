@@ -18,7 +18,7 @@ export function ClosingCta() {
           <p className="flex items-center gap-2 font-display text-paper/80">
             <Mark className="h-5 w-5" /> GarbaConnect
           </p>
-          <p>Payments by Razorpay. Be kind on the floor and in the chat.</p>
+          <p>Be kind on the floor and in the chat.</p>
           <nav aria-label="Policies" className="flex flex-wrap gap-x-5 gap-y-2">
             <Link href="/terms" className="underline underline-offset-4 hover:text-paper">
               Terms

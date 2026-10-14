@@ -11,7 +11,7 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: 'GarbaConnect — Find your Garba partner tonight',
-  description: 'Meet other dancers at your Navratri garba, chat privately for two minutes, and keep the rhythm going.',
+  description: 'Meet dancers at your Navratri garba tonight. Chat privately and find your Garba partner.',
 };
 
 // Rendered per request so the Clerk key check reflects the runtime env, not the build env.
