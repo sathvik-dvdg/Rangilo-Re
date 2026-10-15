@@ -2,11 +2,10 @@
 #   push to preproduction -> staging    (GitHub Environment "staging")
 #   push to main          -> prod       (GitHub Environment "production", required reviewers)
 #
+# Repository secrets: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY (an IAM user's access key).
 # Each GitHub Environment needs these variables (outputs of infra/envs/<env>):
-#   AWS_DEPLOY_ROLE_ARN   deploy_role_arn
 #   ALERT_TOPIC_ARN       alert_topic_arn
 #   APP_URL               app_url
-# No AWS keys are stored in GitHub: the job assumes the deploy role through OIDC.
 #
 # A failure after the new image tag is published puts the previous tag back and
 # refreshes the fleet again. Any failure publishes an alert.
@@ -18,7 +17,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 # One deploy per environment at a time; a newer push waits rather than cancelling a rollout.
 concurrency:
@@ -53,11 +51,12 @@ jobs:
       - name: Tests
         run: npm test
 
-      - name: AWS credentials (OIDC)
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
 
       - name: Names for this environment
         run: |
