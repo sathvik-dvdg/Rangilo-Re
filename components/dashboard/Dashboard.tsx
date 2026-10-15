@@ -1,14 +1,15 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@clerk/nextjs';
 import { motion } from 'framer-motion';
 import { FixedSizeList, type ListChildComponentProps } from 'react-window';
-import { Search, Lock, Shield } from 'lucide-react';
+import { Ban, EllipsisVertical, Search, Lock, Shield } from 'lucide-react';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/button';
 import { GenderBadge } from '@/components/ui/GenderBadge';
+import { Toast } from '@/components/ui/Toast';
 import { CampusEnergyBattle } from './CampusEnergyBattle';
 import { NotificationToggle } from './NotificationToggle';
 import { OnboardingModal } from './OnboardingModal';
@@ -34,6 +35,8 @@ const YEAR_OPTIONS = ['All Years', '1st Year', '2nd Year', '3rd Year', '4th Year
 const ROW = 96;
 /** How often the dancer list is refetched from the server while the tab is visible. */
 const USERS_REFRESH_MS = 30_000;
+/** Holding a card this long on a touch screen opens its actions instead of the chat. */
+const LONG_PRESS_MS = 500;
 const ROW_TWO_UP = 116;
 const DESKTOP_QUERY = '(min-width: 1024px)';
 const TWO_COLUMN_MIN_WIDTH = 680;
@@ -49,6 +52,8 @@ type RowData = {
   /** Unread message counts by sender clerk_id (NOTIF-001). */
   unread: Record<string, number>;
   open: (u: PublicProfile) => void;
+  /** Blocks the dancer (SAFE-001); the card leaves the list at once. */
+  block: (u: PublicProfile) => void;
 };
 
 function Row({ index, style, data }: ListChildComponentProps<RowData>) {
@@ -66,15 +71,65 @@ function DancerCard({ u, index, data }: { u: PublicProfile; index: number; data:
   const shared = data.revealed[u.clerk_id];
   const wantsToConnect = data.incoming.has(u.clerk_id);
   const unread = data.unread[u.clerk_id] ?? 0;
+
+  // Actions (block): the ⋯ button, a long press on touch screens, or a right click.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const card = useRef<HTMLDivElement>(null);
+  const pressTimer = useRef<number | null>(null);
+  const longPressed = useRef(false);
+  const cancelPress = () => {
+    if (pressTimer.current) window.clearTimeout(pressTimer.current);
+    pressTimer.current = null;
+  };
+  const startPress = (e: React.PointerEvent) => {
+    if (e.pointerType === 'mouse') return;
+    longPressed.current = false;
+    cancelPress();
+    pressTimer.current = window.setTimeout(() => {
+      longPressed.current = true;
+      setMenuOpen(true);
+      navigator.vibrate?.(15);
+    }, LONG_PRESS_MS);
+  };
+  useEffect(() => cancelPress, []);
+
+  // A tap outside the card, or Escape, closes the actions.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const outside = (e: PointerEvent) => !card.current?.contains(e.target as Node) && setMenuOpen(false);
+    const escape = (e: KeyboardEvent) => e.key === 'Escape' && setMenuOpen(false);
+    document.addEventListener('pointerdown', outside);
+    document.addEventListener('keydown', escape);
+    return () => {
+      document.removeEventListener('pointerdown', outside);
+      document.removeEventListener('keydown', escape);
+    };
+  }, [menuOpen]);
+
   return (
-    <div className="min-w-0">
+    <div ref={card} className="group relative min-w-0">
       <motion.button
         initial={{ opacity: 0, x: -20 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ delay: Math.min(index, 15) * 0.04 }}
-        onClick={() => data.open(u)}
+        onClick={() => {
+          // The release after a long press is not a tap.
+          if (longPressed.current) {
+            longPressed.current = false;
+            return;
+          }
+          data.open(u);
+        }}
+        onPointerDown={startPress}
+        onPointerUp={cancelPress}
+        onPointerLeave={cancelPress}
+        onPointerCancel={cancelPress}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setMenuOpen(true);
+        }}
         className={cn(
-          'flex h-[88px] w-full items-center gap-3.5 overflow-hidden rounded-lg px-3 text-left transition-colors hover:bg-paper/[0.04] lg:rounded-xl lg:border lg:border-paper/10 lg:bg-ink-2 lg:px-4 lg:hover:border-haldi/50 lg:hover:bg-ink-3',
+          'flex h-[88px] w-full select-none items-center gap-3.5 overflow-hidden rounded-lg px-3 pr-11 text-left transition-colors [-webkit-touch-callout:none] hover:bg-paper/[0.04] lg:rounded-xl lg:border lg:border-paper/10 lg:bg-ink-2 lg:px-4 lg:pr-12 lg:hover:border-haldi/50 lg:hover:bg-ink-3',
           data.cols === 2 ? 'lg:h-[104px]' : 'lg:h-[84px]',
         )}
       >
@@ -147,6 +202,38 @@ function DancerCard({ u, index, data }: { u: PublicProfile; index: number; data:
           </div>
         </div>
       </motion.button>
+
+      {/* Always shown on touch screens; with a mouse, only while the card is hovered or focused. */}
+      <button
+        type="button"
+        aria-label={`More options for ${u.display_name}`}
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        onClick={() => setMenuOpen((open) => !open)}
+        className={cn(
+          'absolute right-1.5 top-1.5 flex h-9 w-9 items-center justify-center rounded-full text-paper/55 transition-opacity hover:bg-paper/10 hover:text-paper focus-visible:opacity-100',
+          !menuOpen && '[@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-focus-within:opacity-100 [@media(hover:hover)]:group-hover:opacity-100',
+        )}
+      >
+        <EllipsisVertical className="h-4 w-4" />
+      </button>
+
+      {menuOpen && (
+        <div role="menu" aria-label={`Actions for ${u.display_name}`} className="absolute right-11 top-1.5 z-10 flex gap-1.5 rounded-full border border-paper/15 bg-ink-3 p-1 shadow-lg shadow-black/40">
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setMenuOpen(false);
+              data.block(u);
+            }}
+            className="flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-semibold text-[#F0A69C] hover:bg-kumkum/20"
+          >
+            <Ban className="h-3.5 w-3.5" />
+            Block
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -168,6 +255,25 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
   const [selectedVibe, setSelectedVibe] = useState<string>('all');
   const [attempt, setAttempt] = useState(0);
   const [editOpen, setEditOpen] = useState(false);
+  const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' } | null>(null);
+  const clearToast = useCallback(() => setToast(null), []);
+
+  // Blocking takes the card off the list at once and puts it back if the server refuses (SAFE-001).
+  const blockDancer = useCallback(async (u: PublicProfile) => {
+    setUsers((list) => list?.filter((x) => x.clerk_id !== u.clerk_id) ?? list);
+    try {
+      const res = await fetch('/api/blocks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ blockedUserId: u.clerk_id }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      setToast({ message: `Blocked ${u.display_name}. You won't see each other.`, tone: 'success' });
+    } catch {
+      setUsers((list) => (list && !list.some((x) => x.clerk_id === u.clerk_id) ? [...list, u] : list));
+      setToast({ message: 'Could not block. Try again.', tone: 'error' });
+    }
+  }, []);
 
   useLobbyPresence(me ? userId ?? null : null);
 
@@ -288,8 +394,9 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
       incoming,
       unread,
       open: (u) => userId && router.push(`/chat/${encodeURIComponent(roomIdFor(userId, u.clerk_id))}`),
+      block: (u) => void blockDancer(u),
     };
-  }, [visible, cols, onlineIds, revealed, incoming, unread, userId, router]);
+  }, [visible, cols, onlineIds, revealed, incoming, unread, userId, router, blockDancer]);
 
   const lobbyNotice = (
     <div className="flex items-center gap-2 rounded-xl border border-haldi/20 bg-ink-2/80 px-3.5 py-2 text-xs text-paper/75 shadow-sm lg:bg-ink/60">
@@ -536,6 +643,7 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
         }}
         onClose={() => setEditOpen(false)}
       />
+      <Toast message={toast?.message ?? null} tone={toast?.tone} onDone={clearToast} />
     </main>
   );
 }

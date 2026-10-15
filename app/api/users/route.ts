@@ -1,9 +1,10 @@
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { PUBLIC_COLUMNS, errorResponse, requireUserId } from '@/lib/server';
+import { blockedIdsFor } from '@/lib/blocks';
 
 export const dynamic = 'force-dynamic';
 
-/** Every dancer except you — public columns only. */
+/** Every dancer except you and anyone on either side of a block with you (SAFE-001) — public columns only. */
 export async function GET() {
   try {
     const userId = requireUserId();
@@ -45,7 +46,8 @@ export async function GET() {
       }
     }
 
-    return Response.json({ users: data ?? [] });
+    const hidden = await blockedIdsFor(userId);
+    return Response.json({ users: (data ?? []).filter((u: { clerk_id: string }) => !hidden.has(u.clerk_id)) });
   } catch (e) {
     return errorResponse(e);
   }

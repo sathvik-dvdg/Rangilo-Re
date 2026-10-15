@@ -21,6 +21,8 @@ export const LIMITS = {
   message: { limit: 30, windowMs: 60_000 },
   /** create-order and verify. */
   payment: { limit: 10, windowMs: 60_000 },
+  /** Blocking and unblocking (SAFE-001). */
+  block: { limit: 10, windowMs: 60_000 },
   /** Onboarding, nickname rerolls, push subscriptions, consent answers, presence heartbeats. */
   account: { limit: 10, windowMs: 60_000 },
 } satisfies Record<string, Limit>;

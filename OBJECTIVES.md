@@ -113,7 +113,7 @@ Razorpay ──► POST /api/webhooks/razorpay (signature-checked, no Clerk auth
 | `POST /api/payment/verify` | `requireUserId` | HMAC check, ledger ownership check, payment fetched from Razorpay and checked (`captured`, order id, amount, currency), `fulfilOrder()`; returns `{ verified }` |
 | `POST /api/webhooks/razorpay` | Signature only | Skips an event id already in `webhook_events`; `payment.captured` → `fulfilOrder()`; `payment.failed` → ledger `failed`; then records the event id and outcome |
 
-### 3.4 Data model — Verified (source), `supabase/migrations/0001_init.sql`, `0002_payment_orders.sql`, `0003_fulfilment_failed_and_webhook_events.sql`, `0004_campus_branch.sql`, `0005_campus_vibe_outfit_instagram.sql`, `0006_contact_consent.sql`, `0006_push_subscriptions.sql`, `0007_admin_actions.sql`, `0008_reveal_requests.sql`, `0009_payment_product_connect.sql`
+### 3.4 Data model — Verified (source), `supabase/migrations/0001_init.sql`, `0002_payment_orders.sql`, `0003_fulfilment_failed_and_webhook_events.sql`, `0004_campus_branch.sql`, `0005_campus_vibe_outfit_instagram.sql`, `0006_contact_consent.sql`, `0006_push_subscriptions.sql`, `0007_admin_actions.sql`, `0008_reveal_requests.sql`, `0009_payment_product_connect.sql`, `0010_blocks_reports.sql`
 
 | Table | Key columns | RLS read policy | Client writes |
 |---|---|---|---|
@@ -128,6 +128,7 @@ Razorpay ──► POST /api/webhooks/razorpay (signature-checked, no Clerk auth
 | `payment_orders` (0002, added 2026-10-14; product column in 0008/0009) | `user_id`, `room_id` (no FK), `order_id` unique, `payment_id` unique, `status` (`created`/`paid`/`failed`/`fulfilment_failed`/`refunded`), `amount`, `currency`, `product` (`connect`/`extend`/`reveal`) | none (service role only) | none |
 | `webhook_events` (0003, added 2026-10-14) | `event_id` primary key (Razorpay event id), `event`, `order_id`, `payment_id` (no FKs), `outcome`, `received_at` | none (service role only) | none |
 | `push_subscriptions` (0006, added 2026-10-14) | `user_id` FK → `users.clerk_id` (cascade delete), `endpoint` unique, `p256dh`, `auth`, `updated_at` | none (service role only) | none |
+| `blocks` (0010, added 2026-10-15) | `blocker_id`, `blocked_id` (both FK → `users.clerk_id`, cascade), `created_at`; primary key (`blocker_id`, `blocked_id`); no self-block | none (service role only) | none |
 | `admin_actions` (0007, added 2026-10-14) | `admin_id`, `action` (`view_roster`/`remove_user`/`block_user`/`remove_room`), `target`, `created_at`; append-only | none (service role only) | none |
 
 Realtime publication: `messages`, `rooms`, `chat_extensions`. `webhook_events` records the webhook events handled in Paid Mode; there is no fuller payment-event audit table and no blocks/reports tables. Whether this migration is what is actually applied to any live database is *Information Required*; the README instructs pasting it into the SQL editor, so there is no migration-version tracking.
@@ -826,12 +827,12 @@ Razorpay onboarding and product eligibility are **unresolved**. The ability to c
 
 #### SAFE-001 — Blocking
 - **Requirement:** A user can block another; blocks are keyed on `clerk_id`, bidirectional in effect (hidden from each other's discovery, cannot open or message the room, cannot be presented as a paid target), and enforced server-side.
-- **Files:** none.
-- **Status:** Missing.
-- **Depends on:** DATA-001.
+- **Files:** `supabase/migrations/0010_blocks_reports.sql` (`blocks`, keyed on `users.clerk_id`, service role only); `lib/blocks.ts`; `app/api/blocks/route.ts` (POST), `app/api/blocks/[userId]/route.ts` (DELETE); `app/api/users/route.ts` (list filter); `lib/server.ts` (`loadRoom`); `components/dashboard/Dashboard.tsx` (Block on each card).
+- **Status:** Implemented — unverified against a real database (2026-10-15, user instruction). The request asked for uuid columns and a uuid in the body; they are Clerk ids because every other table and the browser identify dancers by `clerk_id`, and this objective requires it. Either person blocking the other hides each from the other's list and makes `loadRoom` answer 403 `blocked` to both, so the room cannot be opened, written to, marked read or paid for. The chat page says "This chat is not available" without saying who blocked whom. Only the blocker can lift their own block (DELETE); there is no unblock screen yet. Rate limit: 10 block or unblock calls a minute per user. Before migration 0010 is applied nobody is blocked and POST answers 503. Not done: hiding a blocked dancer's existing unread badge, filtering `/api/reveals`, and an unblock list.
+- **Depends on:** DATA-001 (apply migration 0010).
 - **Acceptance:** TEST-003 block matrix.
-- **Evidence:** TEST-003.
-- **Risks:** Without blocking, anyone can message anyone (gender filter makes targeting easy).
+- **Evidence:** `tests/blocks.test.ts` (22 tests: 201 and one row, idempotent, 401, malformed or uuid id 400, self 400, unknown 404, 429 after 10; DELETE removes only the caller's own block; list hides both directions and works before 0010; messages 403 `blocked` both ways with nothing written or sent; room 403 both ways; unaffected third party). Mutation check: disabling the `loadRoom` check and the list filter failed 5 tests. Passed locally 2026-10-15 with the mocked database; migration 0010 not run in Postgres; dashboard control not exercised in a browser.
+- **Risks:** Without reporting (SAFE-002) a block hides a problem rather than surfacing it.
 
 #### SAFE-002 — Reporting and response
 - **Requirement:** A user can report a participant/conversation; reports are stored with the relevant messages; an owner reviews them; actions (warn, suspend, remove) exist and are recorded.
@@ -1164,14 +1165,14 @@ Status abbreviations: **V** Verified (scope in brackets, e.g. unit/route level) 
 | ID-002 | Consent ≠ payment | payment routes, `lib/payments.ts`, `lib/reveal.ts` | V (unit) | `tests/payment-routes.test.ts`, `tests/consent-flow.test.ts`, `tests/reveal.test.ts`, smoke | Run in CI | DEC-002, DEC-012 |
 | ID-003 | Informed, scoped, revocable | `ConsentBanner.tsx`, 0006/0008 timestamps | P | review; smoke | Revocation (open gap); field choice | DEC-002, DEC-012 |
 | ID-004 | Mutual-exchange option | `lib/consent.ts` | P | `tests/consent-flow.test.ts` | Field choice; decide on ID-004 free mutual scope | ID-001, DEC-002 |
-| SAFE-001 | Blocking | — | M | TEST-003 | Build | DATA-001 |
+| SAFE-001 | Blocking | `lib/blocks.ts`, `app/api/blocks/**`, `loadRoom`, `/api/users`, `Dashboard.tsx`, migration 0010 | IU (route, mocked DB) | `tests/blocks.test.ts` | Apply 0010; unblock screen; browser check | DATA-001 |
 | SAFE-002 | Reporting | `app/admin/*` (removal actions only) | P | test + runbook | Build user reporting and a review queue | DATA-001 |
 | SAFE-003 | 18+ self-declaration at onboarding | `OnboardingModal.tsx`, `actions.ts` | M | TEST-003, TEST-007 | Build | DATA-001; GATE-008 |
 | SAFE-004 | Abuse prevention | — | M | refs | — | CHAT-004/007 |
 | ADMIN-001 | Admin console access | `lib/admin.ts`, `app/admin/*`, `middleware.ts` | IU | `tests/admin.test.ts`; signed-out 404 probe | Signed-in run as admin and non-admin | AUTH-001, DEC-011 |
 | ADMIN-002 | Admin removal actions | `app/admin/actions.ts` | IU | `tests/admin.test.ts` | Run against a test database; unblock path | ADMIN-001/003, PRIV-004 |
 | ADMIN-003 | Admin audit log | `lib/admin.ts`, `0007_admin_actions.sql` | IU | `tests/admin.test.ts` | Apply 0007; set retention | DATA-001, DEC-006 |
-| DATA-001 | Migrations only | `supabase/migrations/` (0001–0008) | P | schema diff | Adopt CLI; apply 0006-0008; README lists all migrations | IR: live DB |
+| DATA-001 | Migrations only | `supabase/migrations/` (0001–0010) | P | schema diff | Adopt CLI; apply 0006-0010; README lists all migrations | IR: live DB |
 | DATA-002 | Entitlement linkage | migration | P | TEST-005 | With PAY-003 | PAY-003 |
 | DATA-003 | User referential integrity | migration | P | integration | With PRIV-004 | PRIV-004 |
 | DATA-004 | Timer monotonic | removed | Retired (DEC-014) | — | — | DEC-014 |

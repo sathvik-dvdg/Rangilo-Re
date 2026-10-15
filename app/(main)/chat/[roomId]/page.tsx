@@ -32,7 +32,8 @@ export default async function ChatPage({ params }: { params: { roomId: string } 
       }
       console.error('[chat]', e);
     }
-    const message = e instanceof HttpError ? e.message : 'Could not open this chat';
+    // A block is reported without saying who blocked whom (SAFE-001).
+    const message = e instanceof HttpError ? (e.message === 'blocked' ? 'This chat is not available' : e.message) : 'Could not open this chat';
     return (
       <main className="grain bandhani flex min-h-[100dvh] flex-col items-center justify-center gap-4 px-6 text-center">
         <Diya className="h-14 w-14 opacity-70" />

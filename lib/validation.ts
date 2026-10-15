@@ -1,6 +1,9 @@
 import 'server-only';
-import type { z } from 'zod';
+import { z } from 'zod';
 import { HttpError } from './server';
+
+/** A Clerk user id (`user_` + letters and digits): how the app names every dancer. */
+export const ClerkUserId = z.string().regex(/^user_[A-Za-z0-9]{1,100}$/);
 
 /**
  * Reads a JSON request body and parses it with `schema` before any field is

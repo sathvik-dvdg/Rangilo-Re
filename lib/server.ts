@@ -1,5 +1,6 @@
 import 'server-only';
 import { auth } from '@clerk/nextjs/server';
+import { isBlockedBetween } from './blocks';
 import { supabaseAdmin } from './supabaseAdmin';
 import { diagnoseDbError } from './dbDiagnosis';
 import { getRevealedContact, getRoomConsent, isMissingSchema } from './consent';
@@ -103,6 +104,8 @@ export async function loadRoom(roomId: string, userId: string) {
   const [me, partner] = await Promise.all([getProfile(userId), getProfile(partnerId)]);
   if (!me) throw new HttpError(409, 'Finish onboarding first');
   if (!partner) throw new HttpError(404, 'That dancer has left');
+  // Either of them blocking the other closes the room to both (SAFE-001).
+  if (await isBlockedBetween(userId, partnerId)) throw new HttpError(403, 'blocked');
 
   const { data: senders, error: sErr } = await db.from('messages').select('sender_id').eq('room_id', roomId);
   if (sErr) throw sErr;

@@ -3,13 +3,14 @@
  *
  * It keeps rows per table, records every write, and copies the parts of the
  * schema the payment and consent code relies on: the contact_consents foreign
- * key and unique indexes, and the three functions from migration
+ * key and unique indexes, the users foreign keys of blocks and reports (0010),
+ * and the three functions from migration
  * 0006_contact_consent.sql. Those copies are only as good as their match with
  * the SQL; the SQL itself was run against Postgres separately (see PAY-010 /
  * ID-001 evidence in OBJECTIVES.md). Nothing here talks to a database.
  */
 export type Row = Record<string, unknown>;
-export type Write = { table: string; op: 'insert' | 'upsert' | 'update'; row: Row };
+export type Write = { table: string; op: 'insert' | 'upsert' | 'update' | 'delete'; row: Row };
 type DbError = { code: string; message: string };
 type Result<T> = { data: T; error: DbError | null };
 
@@ -43,6 +44,9 @@ export function createFakeDb() {
 
   /** What Postgres would refuse, for the tables whose constraints the code depends on. */
   function violation(table: string, row: Row): DbError | null {
+    // Migration 0010: both columns reference users.clerk_id.
+    const userColumns = table === 'blocks' ? ['blocker_id', 'blocked_id'] : table === 'reports' ? ['reporter_id', 'reported_id'] : [];
+    if (userColumns.some((c) => !rowsOf('users').some((u) => u.clerk_id === row[c]))) return FOREIGN_KEY;
     if (table !== 'contact_consents') return null;
     if (!rowsOf('rooms').some((r) => r.id === row.room_id)) return FOREIGN_KEY;
     const sameRoom = rowsOf(table).filter((r) => r.room_id === row.room_id);
@@ -69,7 +73,9 @@ export function createFakeDb() {
     let stored: Row | null = null;
     let error: DbError | null = writeErrors[table] ?? null;
     if (!error) {
-      const existing = conflictColumn ? rowsOf(table).find((r) => r[conflictColumn] === row[conflictColumn]) : undefined;
+      // onConflict may name several columns ("a,b"): a conflict is a row equal on all of them.
+      const keys = conflictColumn?.split(',').map((c) => c.trim()) ?? [];
+      const existing = keys.length ? rowsOf(table).find((r) => keys.every((k) => r[k] === row[k])) : undefined;
       if (existing) {
         stored = existing; // on conflict do nothing
       } else {
@@ -93,6 +99,7 @@ export function createFakeDb() {
   const from = (table: string) => {
     const filters: ((row: Row) => boolean)[] = [];
     let update: Row | null = null;
+    let remove = false;
     let sortBy: { column: string; ascending: boolean } | null = null;
     let columns = '*';
     const matching = () => {
@@ -122,8 +129,17 @@ export function createFakeDb() {
       insert: (row: Row) => write(table, 'insert', row),
       upsert: (row: Row, options: { onConflict?: string } = {}) => write(table, 'upsert', row, options.onConflict),
       update: (values: Row) => ((update = values), query),
-      // Awaiting the builder runs the read or the update, as the Supabase client does.
+      delete: () => ((remove = true), query),
+      // Awaiting the builder runs the read, the update or the delete, as the Supabase client does.
       then: <T>(resolve: (result: Result<Row[] | null>) => T) => {
+        if (remove) {
+          const failed = writeErrors[table] ?? null;
+          if (failed) return Promise.resolve({ data: null, error: failed }).then(resolve);
+          const gone = matching();
+          tables[table] = rowsOf(table).filter((row) => !gone.includes(row));
+          for (const row of gone) writes.push({ table, op: 'delete', row });
+          return Promise.resolve({ data: null, error: null }).then(resolve);
+        }
         const values = update;
         if (!values) return Promise.resolve(read<Row[] | null>(() => matching().map((row) => project(row, columns)), null)).then(resolve);
         const failed = writeErrors[table] ?? null;

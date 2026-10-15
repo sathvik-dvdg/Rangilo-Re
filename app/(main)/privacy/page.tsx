@@ -33,6 +33,9 @@ export default function PrivacyPage() {
           <li>
             <strong className="text-paper">Notifications:</strong> if you turn them on, the address your browser gives us for sending them.
           </li>
+          <li>
+            <strong className="text-paper">Blocks:</strong> who you have blocked. Nobody, including the person you block, is told who blocked them.
+          </li>
           {billing && (
             <li>
               <strong className="text-paper">Payments:</strong> order IDs, amounts and payment status (see Payment data below).

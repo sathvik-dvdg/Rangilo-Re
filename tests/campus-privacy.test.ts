@@ -35,7 +35,10 @@ describe('Campus Profiles & Privacy Rules', () => {
   describe('GET /api/users Privacy Boundary', () => {
     it('requests public campus fields and never queries or returns private fields', async () => {
       let selectedCols = '';
-      mocks.supabaseFrom.mockReturnValue({
+      // The list also asks the blocks table who is on either side of a block (SAFE-001): nobody here.
+      const noBlocks = { select: () => ({ eq: () => Promise.resolve({ data: [], error: null }) }) };
+      mocks.supabaseFrom.mockImplementation((table: string) => (table === 'blocks' ? noBlocks : usersQuery));
+      const usersQuery = {
         select: (cols: string) => {
           selectedCols = cols;
           return {
@@ -61,7 +64,7 @@ describe('Campus Profiles & Privacy Rules', () => {
             }),
           };
         },
-      });
+      };
 
       const res = await getUsers();
       expect(res.status).toBe(200);
