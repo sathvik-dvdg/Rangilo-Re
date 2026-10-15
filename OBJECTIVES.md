@@ -75,7 +75,7 @@ At baseline **no objective is Verified**: the repository has no test suite and n
 | Validation | `zod` `^4.6.5` (added 2026-10-15): request bodies of API routes and the onboarding action (SEC-004) |
 | Lists | `react-window` (dashboard) |
 | Scripts | `dev`, `build`, `start`, `lint` (`next lint`), `typecheck` (`tsc --noEmit`), `test` (`vitest run`, added 2026-10-13). |
-| CI / deployment config | `.github/workflows/ci.yml` added 2026-10-13 (not yet run on GitHub). No deployment config (`vercel.json` etc.). README says "Push to Vercel" — hosting is *Information Required*. |
+| CI / deployment config | `.github/workflows/ci.yml` added 2026-10-13 (not yet run on GitHub). Since 2026-10-15 (DEC-015): `Dockerfile` (standalone Next server), Terraform in `infra/` for EC2 in `ap-south-1` with staging and prod, `.github/workflows/deploy.yml` and `terraform.yml`. Nothing has been applied to AWS or run on GitHub yet. |
 
 ### 3.2 Request and data flow — Verified (source)
 
@@ -156,8 +156,8 @@ Classification of what exists today. "Implemented — unverified" means the code
 | Chat timer start / expiry | Retired (DEC-014, 2026-10-15) | Chats have no time limit; the timer route, countdown and expiry check were removed. |
 | Realtime sync / reconnection | Partial | postgres_changes subscription; no resync of messages missed while disconnected. |
 | Read receipts | Partial | Works in the normal case; read-modify-write race on `read_by[]`. |
-| Blocking | Missing | — |
-| Reporting / moderation | Partial — admin console can remove dancers and rooms and block sign-in (ADMIN-002); no way for users to report yet | `app/admin/*`, `lib/admin.ts` |
+| Blocking | Implemented — unverified | POST /api/blocks, DELETE /api/blocks/[userId]; filters /api/users and blocks messages; Block button on dashboard (tests/blocks.test.ts) |
+| Reporting / moderation | Partial | User reporting: POST /api/reports (SAFE-002, tests/reports.test.ts). Admin console: remove dancers and rooms (ADMIN-002). No user-facing report queue. |
 | Rate limiting / abuse prevention | Partial (2026-10-15) | Per-user, in-memory limits on room creation, messages, payment routes and account actions (CHAT-007); middleware turns away blank and scanner user agents (SEC-005). Not shared between server instances. |
 | Age safeguards | Missing | — |
 | Account deletion / retention | Missing | No Clerk deletion webhook; no retention policy. |
@@ -992,9 +992,9 @@ At baseline there was **no test framework, no test file and no CI**. Vitest was 
 
 | ID | Requirement | Status |
 |---|---|---|
-| **DEP-001** | Separate Clerk instances, Supabase projects and Razorpay modes for development, preview and production. Live Razorpay keys (`rzp_live_`) exist only in production; CFG-002 rejects live keys elsewhere. `BILLING_MODE` is unset (free) in every environment until §20 is complete. | Information Required (hosting and environment layout not in repo) |
-| **DEP-002** | Migrations applied by a recorded process before the code that needs them is deployed; destructive migrations need a written rollback | Missing |
-| **DEP-003** | Rollback: previous deployment can be restored; Free Mode rollback per OPS-005 | Information Required |
+| **DEP-001** | Separate Clerk instances, Supabase projects and Razorpay modes for development, preview and production. Live Razorpay keys (`rzp_live_`) exist only in production; CFG-002 rejects live keys elsewhere. `BILLING_MODE` is unset (free) in every environment until §20 is complete. | Partial (2026-10-15): `infra/envs/staging` and `infra/envs/prod` are separate VPCs, load balancers, fleets, image repositories, parameter paths and deploy roles; each needs its own Clerk instance and Supabase project (`infra/README.md`). `modules/config` never creates `BILLING_MODE` or `RAZORPAY_*`. Not applied yet; no development/preview separation. |
+| **DEP-002** | Migrations applied by a recorded process before the code that needs them is deployed; destructive migrations need a written rollback | Missing. `infra/README.md` lists applying migrations as a manual step before the first deploy; deploy.yml does not run them. |
+| **DEP-003** | Rollback: previous deployment can be restored; Free Mode rollback per OPS-005 | Implemented — unverified (2026-10-15): images are immutable `:<git-sha>` tags (last 20 kept); deploy.yml restores the previous `image_tag` and refreshes the fleet when the rollout or the smoke test fails, then alerts; manual rollback is in `infra/README.md`. Never run; rollback rehearsal not done. |
 | **DEP-004** | Enabling Paid Mode in production is a recorded change linked to the completed §20 checklist (FREE-008) | Missing |
 
 ---
@@ -1070,12 +1070,13 @@ Known limitations of the Free Mode gate, tracked here so they are not mistaken f
 | **DEC-010** | Approved price and products (₹29 is a proposal) | Business decision after GATE-001/003. Products: ₹29 Connect (unlimited chat + mutual contact consent), ₹29 Reveal (name and photo reveal upon recipient allow). |
 | **DEC-011** | Admin access to user data | **Decided 2026-10-14 (maintainer instruction):** admins marked by `role: "admin"` in Clerk public metadata may see real names and emails in the roster and remove dancers and rooms; every view and action is audited (`ADMIN-001..003`). |
 | **DEC-012** | Paid name-and-photo reveal | **Decided 2026-10-14 (maintainer):** requester asks for free, partner allows or declines, and only after an allow can requester pay ₹29 to see name and photo. Email is never shared. (`PAY-017`, `ID-001`). **Superseded 2026-10-14 by DEC-013:** no new request, allow or purchase is possible. |
+| **DEC-015** | Hosting and deployment | **Decided 2026-10-15 (user instruction):** AWS EC2 in `ap-south-1`; domain `garbaconnect.online` (registered at GoDaddy, nameservers delegated to Route 53); staging (`staging.garbaconnect.online`, t3.small) and prod (t3.medium), each 2–4 instances behind an ALB; ALB sticky sessions instead of Redis for the in-memory rate limits (CHAT-007); no SSH (Session Manager only); secrets in SSM SecureString, created by Terraform as placeholders that never reach state; WAF built but off; GitHub Actions with OIDC deploys `preproduction` to staging and `main` to prod after approval. Choices made while building it: the Route 53 zone lives in `infra/bootstrap` (shared by both environments) rather than `modules/dns_cert`; one image repository per environment, because `NEXT_PUBLIC_*` values are baked into the image; `VAPID_PUBLIC_KEY` and `VAPID_SUBJECT` added to the parameters, since push needs all three. Resolves the hosting item under *Information required*. |
 | **DEC-014** | Free, with no chat time limit | **Decided 2026-10-15 (user instruction):** `BILLING_MODE` set to `free` in the developer's `.env.local` (each deployment's own setting is the owner's to change), and the two-minute chat limit removed from the code in every mode: no timer, countdown, expiry or extension. The payment sections of Terms and Privacy, the Refund Policy's paid terms and the footer's Refund Policy link appear only in effective Paid Mode. Razorpay code behind the billing gate is left untouched. Retires CORE-003, CHAT-003, CHAT-004, FREE-005, PAY-018 and DATA-004. **Conflict left open:** the paid `connect` product (DEC-002) sells "unlimited chat" plus a contact request. With no time limit the unlimited half is worth nothing, yet the checkout sheet, Terms and Refund Policy (Paid Mode only) still describe it. Paid Mode must not be enabled until DEC-002 and DEC-010 are revisited. |
 | **DEC-013** | Who may request identity | **Decided 2026-10-14 (user instruction):** only a paying user may request. The ₹29 connect payment is the only way to ask the other dancer for anything: it unlocks unlimited chat and sends the request for real name and email (DEC-002). Removed the same day: the free "Ask to see name & photo" request, the partner's allow/decline for it, the separate ₹29 name-and-photo purchase (`POST /api/rooms/[roomId]/reveal`, `RevealPanel`, `RevealModal`, `notifyRevealRequest`), and `create-order` now refuses `reveal` and `extend`. Kept: reveals already granted still show (chat `sharedWithMe`, dancer list), and a `reveal` or `extend` order created before the change is still fulfilled if its payment lands. `reveal_requests` is left untouched. Supersedes DEC-012 for anything new. |
 
 ### Information required
 
-- Hosting platform and environment layout (README says Vercel; nothing in repo confirms).
+- ~~Hosting platform and environment layout~~ Decided 2026-10-15: EC2 in `ap-south-1` (DEC-015).
 - Whether `0001_init.sql` matches any live database; whether Clerk ↔ Supabase third-party auth is configured.
 - Whether any live Razorpay payments have ever been taken.
 - Razorpay written eligibility response (GATE-001/003).
@@ -1185,9 +1186,9 @@ Status abbreviations: **V** Verified (scope in brackets, e.g. unit/route level) 
 | TEST-002 | Billing config tests | `tests/billing.test.ts` | IU (passing locally) | local run | Run in CI | TEST-006 |
 | TEST-004 | Payment tests | `tests/payment-routes.test.ts`, `tests/consent-flow.test.ts` | P | local run | PAY-006, PAY-012 automatic refunds; real database | PAY-003 |
 | TEST-006 | CI | `.github/workflows/ci.yml` | IU | local clean-worktree simulation | First GitHub run; make required check on `main` | push (owner) |
-| TEST-007 | Free Mode smoke | `tests/smoke/free-mode.test.ts` | P (in-process, mocked) | `npm run test:smoke` | Browser-level flow incl. sign-up/onboarding/discovery | test Clerk/Supabase projects or browser tooling |
+| TEST-007 | Free Mode smoke | `tests/smoke/free-mode.test.ts` (in-process); `tests/smoke/deploy.spec.ts` (Part A, live HTTP, no login; added 2026-10-15) | P | `npm run test:smoke`; Part A run against the app container locally 2026-10-15 (7 passed, HTTPS redirect skipped without a load balancer) | Run Part A on staging; Part B browser flow with Clerk test users | staging environment |
 | TEST-003, TEST-005 | Testing | — | M | — | Phase 0/1 | — |
-| DEP-001…004 | Deployment | — | IR/M | see §15 | see §15 | — |
+| DEP-001…004 | Deployment | `infra/`, `Dockerfile`, `deploy.yml`, `terraform.yml` | P/M/IU/M | `terraform validate` (all roots and modules, 2026-10-15); nothing applied | Apply bootstrap and staging; rehearse rollback; automate migrations | AWS account, GoDaddy NS change |
 
 ### 18.2 Change-management rules
 

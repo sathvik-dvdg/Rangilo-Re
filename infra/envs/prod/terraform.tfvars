@@ -1,0 +1,9 @@
+environment         = "prod"
+domain_name         = "garbaconnect.online"
+vpc_cidr            = "10.20.0.0/16"
+instance_type       = "t3.medium"
+min_size            = 2
+max_size            = 4
+deletion_protection = true
+enable_waf          = false
+github_environment  = "production"

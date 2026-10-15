@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:smoke": "vitest run tests/smoke",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:deploy": "playwright test --config playwright.config.ts"
   },
   "dependencies": {
     "@clerk/nextjs": "^5.7.6",
@@ -39,6 +40,7 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/canvas-confetti": "^1.9.0",
     "@types/node": "^20.19.43",
     "@types/react": "^18.3.31",

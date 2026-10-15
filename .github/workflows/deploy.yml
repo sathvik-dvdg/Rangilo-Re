@@ -1,0 +1,145 @@
+# Builds the app image and rolls it out to EC2 (infra/, DEP-001..004).
+#   push to preproduction -> staging    (GitHub Environment "staging")
+#   push to main          -> prod       (GitHub Environment "production", required reviewers)
+#
+# Each GitHub Environment needs these variables (outputs of infra/envs/<env>):
+#   AWS_DEPLOY_ROLE_ARN   deploy_role_arn
+#   ALERT_TOPIC_ARN       alert_topic_arn
+#   APP_URL               app_url
+# No AWS keys are stored in GitHub: the job assumes the deploy role through OIDC.
+#
+# A failure after the new image tag is published puts the previous tag back and
+# refreshes the fleet again. Any failure publishes an alert.
+name: Deploy
+
+on:
+  push:
+    branches: [preproduction, main]
+
+permissions:
+  contents: read
+  id-token: write
+
+# One deploy per environment at a time; a newer push waits rather than cancelling a rollout.
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+    env:
+      AWS_REGION: ap-south-1
+      APP_ENV: ${{ github.ref_name == 'main' && 'prod' || 'staging' }}
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Tests
+        run: npm test
+
+      - name: AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Names for this environment
+        run: |
+          echo "NAME=garbaconnect-$APP_ENV" >> "$GITHUB_ENV"
+          echo "PARAM_PREFIX=/garbaconnect/$APP_ENV" >> "$GITHUB_ENV"
+
+      - name: Log in to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # NEXT_PUBLIC_* values are inlined into the browser bundle and the CSP at build time.
+      # They are public by design; server secrets are never read here.
+      - name: Build image
+        run: |
+          param() { aws ssm get-parameter --name "$PARAM_PREFIX/env/$1" --query Parameter.Value --output text; }
+          image="${{ steps.ecr.outputs.registry }}/$NAME:${{ github.sha }}"
+          docker build \
+            --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="$(param NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY)" \
+            --build-arg NEXT_PUBLIC_SUPABASE_URL="$(param NEXT_PUBLIC_SUPABASE_URL)" \
+            --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY="$(param NEXT_PUBLIC_SUPABASE_ANON_KEY)" \
+            -t "$image" .
+          echo "IMAGE=$image" >> "$GITHUB_ENV"
+
+      # The same check as ci.yml, on the browser chunks actually inside the image.
+      - name: Client bundle does not reference server secrets
+        run: |
+          cid=$(docker create "$IMAGE")
+          docker cp "$cid:/app/.next/static" ./image-static
+          docker rm "$cid" >/dev/null
+          if grep -rlE 'RAZORPAY_KEY_SECRET|RAZORPAY_WEBHOOK_SECRET|SUPABASE_SERVICE_ROLE_KEY|BILLING_MODE|VAPID_PRIVATE_KEY' ./image-static; then
+            echo "::error::A server-only variable is referenced in the client bundle"
+            exit 1
+          fi
+
+      - name: Push image
+        run: docker push "$IMAGE"
+
+      - name: Publish the new image tag
+        id: release
+        run: |
+          previous=$(aws ssm get-parameter --name "$PARAM_PREFIX/image_tag" --query Parameter.Value --output text)
+          echo "previous_tag=$previous" >> "$GITHUB_OUTPUT"
+          aws ssm put-parameter --name "$PARAM_PREFIX/image_tag" --value "${{ github.sha }}" --type String --overwrite
+          echo "tag_published=true" >> "$GITHUB_OUTPUT"
+          echo "Image tag: $previous -> ${{ github.sha }}"
+
+      # New instances boot the new image and must pass the load balancer health check
+      # before old ones are removed (MinHealthyPercentage 100, MaxHealthyPercentage 200).
+      - name: Roll the fleet
+        run: |
+          id=$(aws autoscaling start-instance-refresh --auto-scaling-group-name "$NAME" \
+            --preferences '{"MinHealthyPercentage":100,"MaxHealthyPercentage":200,"InstanceWarmup":180}' \
+            --query InstanceRefreshId --output text)
+          bash infra/scripts/wait-instance-refresh.sh "$NAME" "$id" 1800
+
+      - name: Smoke test (Part A, no login)
+        env:
+          BASE_URL: ${{ vars.APP_URL }}
+        run: npx playwright test --config playwright.config.ts
+
+      - name: Roll back to the previous image
+        if: failure() && steps.release.outputs.tag_published == 'true' && steps.release.outputs.previous_tag != 'unset'
+        run: |
+          previous="${{ steps.release.outputs.previous_tag }}"
+          echo "Restoring image tag $previous"
+          aws ssm put-parameter --name "$PARAM_PREFIX/image_tag" --value "$previous" --type String --overwrite
+          # A refresh that is still running must stop before another can start.
+          aws autoscaling cancel-instance-refresh --auto-scaling-group-name "$NAME" 2>/dev/null || true
+          for _ in $(seq 1 30); do
+            busy=$(aws autoscaling describe-instance-refreshes --auto-scaling-group-name "$NAME" \
+              --query "length(InstanceRefreshes[?Status=='Pending' || Status=='InProgress' || Status=='Cancelling'])" --output text)
+            [ "$busy" = "0" ] && break
+            sleep 10
+          done
+          id=$(aws autoscaling start-instance-refresh --auto-scaling-group-name "$NAME" \
+            --preferences '{"MinHealthyPercentage":100,"MaxHealthyPercentage":200,"InstanceWarmup":180}' \
+            --query InstanceRefreshId --output text)
+          bash infra/scripts/wait-instance-refresh.sh "$NAME" "$id" 1800
+
+      - name: Alert
+        if: failure()
+        run: |
+          aws sns publish --topic-arn "${{ vars.ALERT_TOPIC_ARN }}" \
+            --subject "GarbaConnect $APP_ENV deploy failed" \
+            --message "Deploy of ${{ github.sha }} to $APP_ENV failed. Rolled back: ${{ steps.release.outputs.tag_published == 'true' && 'attempted (see run)' || 'not needed, the fleet was not changed' }}. Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

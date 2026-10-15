@@ -1,0 +1,8 @@
+# Provider plugins and local state. Remote state lives in S3 (see bootstrap/).
+# .terraform.lock.hcl is committed so every run uses the same provider builds.
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log

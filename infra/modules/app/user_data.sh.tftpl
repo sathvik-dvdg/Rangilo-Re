@@ -1,0 +1,60 @@
+#!/bin/bash
+# First-boot script for a GarbaConnect app instance (rendered by modules/app).
+# Runs once as root. Every deploy replaces instances (ASG instance refresh), so a
+# new image means a new instance running this script again, never an in-place update.
+set -euo pipefail
+exec > >(tee -a /var/log/garbaconnect-boot.log) 2>&1
+
+REGION="${region}"
+PREFIX="${parameter_prefix}"
+REPOSITORY="${ecr_repository_url}"
+REGISTRY="$${REPOSITORY%%/*}"
+LOG_GROUP="${log_group_name}"
+ENV_FILE=/etc/garbaconnect.env
+
+# 1. Docker.
+dnf install -y docker
+systemctl enable --now docker
+
+# This instance's id names its log stream.
+TOKEN=$(curl -sS -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
+INSTANCE_ID=$(curl -sS -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)
+
+# 2. Log in to this environment's registry.
+aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$REGISTRY"
+
+# 3. Which image to run. "unset" means nothing has been deployed yet.
+IMAGE_TAG=$(aws ssm get-parameter --region "$REGION" --name "$PREFIX/image_tag" --query Parameter.Value --output text)
+if [ "$IMAGE_TAG" = "unset" ]; then
+  echo "No image deployed yet: $PREFIX/image_tag is unset. Run deploy.yml first."
+  exit 0
+fi
+
+# 4. Every parameter under $PREFIX/env/ becomes NAME=value in a root-only file.
+#    The file is written under umask 077 and then installed 600 root:root.
+umask 077
+TMP_ENV=$(mktemp)
+aws ssm get-parameters-by-path --region "$REGION" --path "$PREFIX/env/" --with-decryption \
+  --query 'Parameters[].[Name,Value]' --output text |
+  while IFS=$'\t' read -r name value; do
+    printf '%s=%s\n' "$${name##*/}" "$value"
+  done > "$TMP_ENV"
+install -m 600 -o root -g root "$TMP_ENV" "$ENV_FILE"
+rm -f "$TMP_ENV"
+
+# 5. Pull the image.
+IMAGE="$REPOSITORY:$IMAGE_TAG"
+docker pull "$IMAGE"
+
+# 6. Run it; Docker restarts it if it exits, and its output goes to CloudWatch.
+docker rm -f garbaconnect >/dev/null 2>&1 || true
+docker run -d --name garbaconnect --restart always \
+  --env-file "$ENV_FILE" \
+  -p ${app_port}:3000 \
+  --log-driver awslogs \
+  --log-opt awslogs-region="$REGION" \
+  --log-opt awslogs-group="$LOG_GROUP" \
+  --log-opt awslogs-stream="$INSTANCE_ID" \
+  "$IMAGE"
+
+echo "Started $IMAGE"

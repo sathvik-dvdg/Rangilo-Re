@@ -175,4 +175,6 @@ Typography is Cinzel for display and Nunito for UI, both self-hosted through Fon
 
 Not ready for production; see [Project status](#project-status).
 
-For a preview deployment (for example on Vercel), add the Clerk and Supabase variables from `.env.example` and leave `BILLING_MODE` and the `RAZORPAY_*` variables unset so the app runs in Free Mode. Hosting and environment separation are not yet documented (DEP-001).
+The app runs as a Docker image (`Dockerfile`) on EC2 in `ap-south-1`, with a staging and a prod environment defined in Terraform. [`infra/README.md`](infra/README.md) covers first-time setup, deploys (`.github/workflows/deploy.yml`), infrastructure changes (`.github/workflows/terraform.yml`) and rollback. `BILLING_MODE` and the `RAZORPAY_*` variables are never set there, so it runs in Free Mode.
+
+After a deploy, `BASE_URL=https://<host> npm run test:deploy` runs the no-login smoke test (`tests/smoke/deploy.spec.ts`).

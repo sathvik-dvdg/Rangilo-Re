@@ -8,3 +8,7 @@ build
 *.tsbuildinfo
 next-env.d.ts
 .DS_Store
+
+# Playwright deploy smoke test output
+/test-results/
+/playwright-report/

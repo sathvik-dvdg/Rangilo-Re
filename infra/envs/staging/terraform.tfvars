@@ -1,0 +1,9 @@
+environment         = "staging"
+domain_name         = "staging.garbaconnect.online"
+vpc_cidr            = "10.30.0.0/16"
+instance_type       = "t3.small"
+min_size            = 2
+max_size            = 4
+deletion_protection = false
+enable_waf          = false
+github_environment  = "staging"
