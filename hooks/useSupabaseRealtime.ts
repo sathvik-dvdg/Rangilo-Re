@@ -7,8 +7,6 @@ import type { Message } from '@/lib/types';
 type Handlers = {
   onMessage: (m: Message) => void;
   onMessageUpdate: (m: Message) => void;
-  onTimerStart: (iso: string) => void;
-  onExtension: (extraSeconds: number) => void;
   /** A connect request in this room was created or answered. Carries no identity: refetch the room from the server. */
   onConsentChange: () => void;
   /** The room became unlimited (it was paid for). */
@@ -19,9 +17,8 @@ type Handlers = {
 
 /**
  * Subscribes to everything a chat room needs on one channel `room:<id>`:
- * message inserts/updates, the room row (timer start, unlimited), extensions,
- * connect requests, reveal requests, and presence so we know when both dancers
- * have the room open.
+ * message inserts/updates, the room row (unlimited), connect requests, reveal
+ * requests, and presence so we know whether the partner has the room open.
  */
 export function useRoomRealtime(roomId: string, userId: string | null, handlers: Handlers) {
   const supabase = useSupabase();
@@ -41,16 +38,12 @@ export function useRoomRealtime(roomId: string, userId: string | null, handlers:
         h.current.onMessageUpdate(p.new as Message),
       )
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` }, (p) => {
-        const room = p.new as { timer_started_at: string | null; unlimited?: boolean };
-        if (room.timer_started_at) h.current.onTimerStart(room.timer_started_at);
+        const room = p.new as { unlimited?: boolean };
         if (room.unlimited) h.current.onUnlimited();
       })
       // RLS delivers these rows only to the requester and the person asked (contact-consent flow).
       .on('postgres_changes', { event: '*', schema: 'public', table: 'contact_consents', filter: `room_id=eq.${roomId}` }, () =>
         h.current.onConsentChange(),
-      )
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_extensions', filter: `room_id=eq.${roomId}` }, (p) =>
-        h.current.onExtension((p.new as { extra_seconds: number }).extra_seconds),
       )
       // RLS delivers reveal_requests only to the two dancers involved. Nothing new can be asked (DEC-013),
       // but a reveal paid for before then is granted when its payment lands, and should appear at once.

@@ -71,9 +71,7 @@ export type RoomState = {
   me: PublicProfile;
   partner: PublicProfile;
   messages: Message[];
-  timerStartedAt: string | null;
-  extraSeconds: number;
-  /** True once the room has been paid for: the chat no longer expires, whatever the partner answers. */
+  /** True once the room has been paid for in Paid Mode. Chats have no time limit (DEC-014); this only hides the connect offer. */
   unlimited: boolean;
   /** The contact-consent state for the connect flow (contact_consents table). */
   consent: RoomConsent;

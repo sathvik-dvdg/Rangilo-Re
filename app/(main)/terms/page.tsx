@@ -1,12 +1,15 @@
 import type { Metadata } from 'next';
+import { isBillingEnabled } from '@/lib/billing';
 import { PolicyLink, PolicyPage, Section, SupportEmail } from '@/components/legal/Policy';
 
 export const metadata: Metadata = {
   title: 'Terms of Service — GarbaConnect',
-  description: 'The rules for using GarbaConnect: who can use it, how to behave, what payments buy and how to reach us.',
+  description: 'The rules for using GarbaConnect: who can use it, how to behave and how to reach us.',
 };
 
+/** The Payments and Refunds sections appear only in effective Paid Mode (FREE-003, PRIV-006). */
 export default function TermsPage() {
+  const billing = isBillingEnabled();
   return (
     <PolicyPage eyebrow="Legal" title="Terms of Service">
       <Section title="Acceptance of these terms">
@@ -19,10 +22,9 @@ export default function TermsPage() {
       <Section title="What GarbaConnect is">
         <p>
           GarbaConnect helps people at Navratri garba events find a dance partner. You appear to other dancers under a nickname, can see who is on
-          the floor, and can open a short private chat with one other dancer at a time. A free chat lasts two minutes, counted from when you have both
-          said hi.
+          the floor, and can open a private chat with one other dancer at a time.
         </p>
-        <p>Your real name and email are never shown to other dancers unless you agree to share them (see Payments below).</p>
+        <p>Your real name and email are never shown to other dancers unless you agree to share them{billing && ' (see Payments below)'}.</p>
       </Section>
 
       <Section title="Who can use it">
@@ -43,20 +45,24 @@ export default function TermsPage() {
         </ul>
       </Section>
 
-      <Section title="Payments">
-        <p>
-          When payments are available, ₹29 is a one-time payment for one chat. It removes the time limit on that chat as soon as the payment is
-          confirmed, and asks the other dancer whether they agree to share contact details. Only if they accept do you each see the other&apos;s real
-          name and email. Paying never replaces their consent.
-        </p>
-        <p>Payments are processed by Razorpay. There are no subscriptions and no recurring charges.</p>
-      </Section>
+      {billing && (
+        <>
+          <Section title="Payments">
+            <p>
+              When payments are available, ₹29 is a one-time payment for one chat. It removes the time limit on that chat as soon as the payment is
+              confirmed, and asks the other dancer whether they agree to share contact details. Only if they accept do you each see the other&apos;s real
+              name and email. Paying never replaces their consent.
+            </p>
+            <p>Payments are processed by Razorpay. There are no subscriptions and no recurring charges.</p>
+          </Section>
 
-      <Section title="Refunds">
-        <p>
-          When a payment can be refunded is set out in our <PolicyLink href="/refund-policy">Refund Policy</PolicyLink>.
-        </p>
-      </Section>
+          <Section title="Refunds">
+            <p>
+              When a payment can be refunded is set out in our <PolicyLink href="/refund-policy">Refund Policy</PolicyLink>.
+            </p>
+          </Section>
+        </>
+      )}
 
       <Section title="Privacy">
         <p>

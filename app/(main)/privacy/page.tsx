@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { isBillingEnabled } from '@/lib/billing';
 import { PolicyLink, PolicyPage, Section, SupportEmail } from '@/components/legal/Policy';
 
 export const metadata: Metadata = {
@@ -9,8 +10,10 @@ export const metadata: Metadata = {
 /**
  * Must match what the app actually stores and shows (PRIV-006). If a field is
  * added to onboarding, or a new service receives data, update this page too.
+ * Payment data and Razorpay are named only in effective Paid Mode (FREE-003).
  */
 export default function PrivacyPage() {
+  const billing = isBillingEnabled();
   return (
     <PolicyPage eyebrow="Legal" title="Privacy Policy">
       <Section title="What we collect">
@@ -30,16 +33,18 @@ export default function PrivacyPage() {
           <li>
             <strong className="text-paper">Notifications:</strong> if you turn them on, the address your browser gives us for sending them.
           </li>
-          <li>
-            <strong className="text-paper">Payments:</strong> order IDs, amounts and payment status (see Payment data below).
-          </li>
+          {billing && (
+            <li>
+              <strong className="text-paper">Payments:</strong> order IDs, amounts and payment status (see Payment data below).
+            </li>
+          )}
         </ul>
       </Section>
 
       <Section title="How we use it">
         <p>
-          To show you other dancers and show you to them, to run your chats and notify you of new messages, to process payments through Razorpay,
-          and to keep the service safe, including investigating reports of misuse.
+          To show you other dancers and show you to them, to run your chats and notify you of new messages,
+          {billing && ' to process payments through Razorpay,'} and to keep the service safe, including investigating reports of misuse.
         </p>
       </Section>
 
@@ -64,13 +69,15 @@ export default function PrivacyPage() {
         </ul>
       </Section>
 
-      <Section title="Payment data">
-        <p>
-          Payments are handled by Razorpay. We never see or store your card, UPI or bank details. We store only the order ID, the payment ID, the
-          amount and whether the payment succeeded, and we keep these records even after an account is deleted, as needed for accounting and
-          refunds.
-        </p>
-      </Section>
+      {billing && (
+        <Section title="Payment data">
+          <p>
+            Payments are handled by Razorpay. We never see or store your card, UPI or bank details. We store only the order ID, the payment ID, the
+            amount and whether the payment succeeded, and we keep these records even after an account is deleted, as needed for accounting and
+            refunds.
+          </p>
+        </Section>
+      )}
 
       <Section title="How long we keep it">
         <p>
@@ -85,11 +92,14 @@ export default function PrivacyPage() {
             <strong className="text-paper">Clerk</strong>, for sign-in and your account, including your profile photo.
           </li>
           <li>
-            <strong className="text-paper">Supabase</strong>, for our database, where your profile, messages and payment records are stored.
+            <strong className="text-paper">Supabase</strong>, for our database, where your profile{billing ? ', messages and payment records are' : ' and messages are'}{' '}
+            stored.
           </li>
-          <li>
-            <strong className="text-paper">Razorpay</strong>, for payments.
-          </li>
+          {billing && (
+            <li>
+              <strong className="text-paper">Razorpay</strong>, for payments.
+            </li>
+          )}
           <li>
             <strong className="text-paper">Your browser&apos;s push service</strong> (from Google, Mozilla, Apple or Microsoft, depending on your
             browser), if you turn on notifications. A notification carries a nickname and a link, never the text of a message.
@@ -103,10 +113,16 @@ export default function PrivacyPage() {
           You can see and edit your profile at any time. To have your account and data deleted, or to ask what we hold about you, email{' '}
           <SupportEmail /> from the email on your account.
         </p>
-        <p>
-          For how payments and refunds work, see our <PolicyLink href="/refund-policy">Refund Policy</PolicyLink> and{' '}
-          <PolicyLink href="/terms">Terms of Service</PolicyLink>.
-        </p>
+        {billing ? (
+          <p>
+            For how payments and refunds work, see our <PolicyLink href="/refund-policy">Refund Policy</PolicyLink> and{' '}
+            <PolicyLink href="/terms">Terms of Service</PolicyLink>.
+          </p>
+        ) : (
+          <p>
+            See also our <PolicyLink href="/terms">Terms of Service</PolicyLink>.
+          </p>
+        )}
       </Section>
 
       <Section title="Contact">

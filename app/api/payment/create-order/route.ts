@@ -3,6 +3,7 @@ import { getRoomConsent } from '@/lib/consent';
 import { recordOrder, type OrderNotes } from '@/lib/payments';
 import { razorpay } from '@/lib/razorpay';
 import { PRICE_PAISE, partnerFromRoomId } from '@/lib/room';
+import { enforceRateLimit } from '@/lib/rateLimit';
 import { HttpError, errorResponse, loadRoom, requireUserId } from '@/lib/server';
 import { isRecord } from '@/lib/utils';
 
@@ -13,6 +14,8 @@ const CURRENCY = 'INR';
 export async function POST(req: Request) {
   try {
     const userId = requireUserId();
+    // In memory only: no database or Razorpay access (FREE-004).
+    enforceRateLimit('payment', userId);
     // Before touching the body, the database or Razorpay (FREE-004).
     // Paid Mode must not be enabled in production: the OBJECTIVES.md §8 gates are not met.
     const disabled = billingDisabledResponse();

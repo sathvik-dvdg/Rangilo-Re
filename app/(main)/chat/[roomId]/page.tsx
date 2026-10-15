@@ -6,7 +6,7 @@ import { getClerkConfigProblems } from '@/lib/clerkConfig';
 import { ChatRoom } from '@/components/chat/ChatRoom';
 import { HttpError, getRoomState } from '@/lib/server';
 import { buttonVariants } from '@/components/ui/button';
-import { Diya } from '@/components/chat/TimerExpiredOverlay';
+import { Diya } from '@/components/chat/Diya';
 import { diagnoseDbError } from '@/lib/dbDiagnosis';
 import { BackendProblem } from '@/components/layout/BackendProblem';
 
@@ -21,7 +21,7 @@ export default async function ChatPage({ params }: { params: { roomId: string } 
   try {
     const state = await getRoomState(decodeURIComponent(params.roomId), userId);
     // Only hides or shows payment UI; the billing routes enforce the mode themselves.
-    return <ChatRoom key={state.roomId} initial={state} billingEnabled={isBillingEnabled()} renderedAt={Date.now()} />;
+    return <ChatRoom key={state.roomId} initial={state} billingEnabled={isBillingEnabled()} />;
   } catch (e) {
     if (e instanceof HttpError && e.status === 409) redirect('/dashboard');
     if (!(e instanceof HttpError)) {

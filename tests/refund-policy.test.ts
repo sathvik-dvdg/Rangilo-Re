@@ -13,13 +13,15 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import RefundPolicyPage from '@/app/(main)/refund-policy/page';
+import { inMode } from './helpers/billingMode';
 import { ClosingCta } from '@/components/landing/ClosingCta';
 import { FeaturesReveal } from '@/components/landing/FeaturesReveal';
 import { ConnectModal } from '@/components/modals/ConnectModal';
 import { PRICE_PAISE } from '@/lib/room';
 
-describe('refund policy page', () => {
-  const html = renderToStaticMarkup(RefundPolicyPage()).replace(/\s+/g, ' ');
+// The paid terms are published only in effective Paid Mode; tests/legal-pages.test.ts covers Free Mode.
+describe('refund policy page (Paid Mode)', () => {
+  const html = inMode('paid', () => renderToStaticMarkup(RefundPolicyPage())).replace(/\s+/g, ' ');
 
   it('states the price the server charges and the two things it pays for', () => {
     expect(html).toContain(`₹${PRICE_PAISE / 100}`);
@@ -60,8 +62,8 @@ describe('refund policy page', () => {
 });
 
 describe('links to the refund policy', () => {
-  it('landing footer', () => {
-    expect(renderToStaticMarkup(ClosingCta())).toContain('href="/refund-policy"');
+  it('landing footer, in Paid Mode', () => {
+    expect(inMode('paid', () => renderToStaticMarkup(ClosingCta()))).toContain('href="/refund-policy"');
   });
 
   it('checkout sheet, in a new tab (PAY-016)', () => {

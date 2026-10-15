@@ -226,7 +226,7 @@ describe('sending', () => {
       url: '/chat/user_alice_user_bob',
       tag: 'user_alice_user_bob',
     });
-    expect(options).toMatchObject({ TTL: 120, vapidDetails: { subject: 'mailto:owner@example.com', publicKey: 'public-key', privateKey: 'private-key' } });
+    expect(options).toMatchObject({ TTL: 3600, vapidDetails: { subject: 'mailto:owner@example.com', publicKey: 'public-key', privateKey: 'private-key' } });
   });
 
   it('forgets a subscription the push service reports as gone', async () => {

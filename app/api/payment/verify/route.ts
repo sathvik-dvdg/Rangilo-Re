@@ -1,6 +1,7 @@
 import { billingDisabledResponse } from '@/lib/billing';
 import { fulfilOrder, getOrder } from '@/lib/payments';
 import { razorpay, verifyCheckoutSignature } from '@/lib/razorpay';
+import { enforceRateLimit } from '@/lib/rateLimit';
 import { HttpError, errorResponse, requireUserId } from '@/lib/server';
 import { isRecord } from '@/lib/utils';
 
@@ -11,6 +12,8 @@ const text = (value: unknown) => (typeof value === 'string' ? value : '');
 export async function POST(req: Request) {
   try {
     const userId = requireUserId();
+    // In memory only: no database or Razorpay access (FREE-004).
+    enforceRateLimit('payment', userId);
     // Before touching the body, the database or Razorpay (FREE-004).
     // Paid Mode must not be enabled in production: the OBJECTIVES.md §8 gates are not met.
     const disabled = billingDisabledResponse();

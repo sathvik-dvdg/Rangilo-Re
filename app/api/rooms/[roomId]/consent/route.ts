@@ -1,6 +1,10 @@
+import { z } from 'zod';
 import { getRoomConsent, respondToConsent } from '@/lib/consent';
-import { HttpError, errorResponse, requireUserId } from '@/lib/server';
-import { isRecord } from '@/lib/utils';
+import { errorResponse, requireUserId } from '@/lib/server';
+import { enforceRateLimit } from '@/lib/rateLimit';
+import { parseBody } from '@/lib/validation';
+
+const ConsentBody = z.object({ action: z.enum(['accept', 'decline']) });
 
 export const dynamic = 'force-dynamic';
 
@@ -22,9 +26,8 @@ export async function GET(_req: Request, { params }: { params: { roomId: string 
 export async function POST(req: Request, { params }: { params: { roomId: string } }) {
   try {
     const userId = requireUserId();
-    const body: unknown = await req.json().catch(() => null);
-    const action = isRecord(body) ? body.action : undefined;
-    if (action !== 'accept' && action !== 'decline') throw new HttpError(400, 'Unknown action');
+    enforceRateLimit('account', userId);
+    const { action } = await parseBody(req, ConsentBody, 'Unknown action');
 
     const status = await respondToConsent(decodeURIComponent(params.roomId), userId, action);
     return Response.json({ status });

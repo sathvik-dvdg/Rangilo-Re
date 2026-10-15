@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | Baseline v1 — established 2026-10-12 from a read-only review of commit `3b75369`. Updated 2026-10-13: decisions DEC-001/002/005; billing gate (CFG-001…003, FREE-004) and test runner (TEST-001). Updated 2026-10-14: payment ledger (PAY-003), Paid Mode test-key integration (PAY-002…009, PAY-015), paid reveal purchase path removed (ID-002, FU-003 in part). Later 2026-10-14: `verify` fetches the payment from Razorpay (PAY-006), `fulfilment_failed` state (PAY-010), webhook event ids recorded (PAY-008), migration `0003`. Later 2026-10-14: landing paid claims, invented stats and testimonials removed (DEC-008; FREE-003, PRIV-006). |
+| Status | Baseline v1 — established 2026-10-12 from a read-only review of commit `3b75369`. Updated 2026-10-13: decisions DEC-001/002/005; billing gate (CFG-001…003, FREE-004) and test runner (TEST-001). Updated 2026-10-14: payment ledger (PAY-003), Paid Mode test-key integration (PAY-002…009, PAY-015), paid reveal purchase path removed (ID-002, FU-003 in part). Later 2026-10-14: `verify` fetches the payment from Razorpay (PAY-006), `fulfilment_failed` state (PAY-010), webhook event ids recorded (PAY-008), migration `0003`. Later 2026-10-14: landing paid claims, invented stats and testimonials removed (DEC-008; FREE-003, PRIV-006). Updated 2026-10-15 (DEC-014): free, with no chat time limit; payment sections of the policy pages shown only in Paid Mode; per-user rate limits (CHAT-007), Zod body validation (SEC-004), security headers and middleware request checks (SEC-005). |
 | Owner | Project owner (product decisions) · whoever edits code (keeping this file accurate) |
 | Authority | This file is the authoritative specification for product behaviour, security boundaries and readiness gates. The source code is the authority on *current* behaviour. Where they disagree, the disagreement is recorded here as a gap, not silently resolved. |
 | Agent rules | [`CLAUDE.md`](CLAUDE.md) requires every coding task to consult this file. |
@@ -37,6 +37,7 @@ Out of scope: visual design, the landing-page animation stack, and marketing str
 | **Conflicts** | Existing code does something the objective prohibits. Must be fixed or the objective formally changed. |
 | **Missing** | Required, nothing implemented. |
 | **Planned** | Future work, intentionally not started (usually gated by a phase or decision). |
+| **Retired** | Withdrawn by a recorded decision (named in the entry); kept so its history stays traceable. |
 
 At baseline **no objective is Verified**: the repository has no test suite and no CI.
 
@@ -71,6 +72,7 @@ At baseline **no objective is Verified**: the repository has no test suite and n
 | Payments | `razorpay` `^2.9.8` server SDK + Checkout.js loaded from `checkout.razorpay.com` at click time |
 | Notifications | `web-push` `^3.6.7` (server; signs and encrypts Web Push messages) + `public/sw.js` service worker; added 2026-10-14 |
 | Client state | Zustand 5 (`store/useAppStore.ts`) |
+| Validation | `zod` `^4.6.5` (added 2026-10-15): request bodies of API routes and the onboarding action (SEC-004) |
 | Lists | `react-window` (dashboard) |
 | Scripts | `dev`, `build`, `start`, `lint` (`next lint`), `typecheck` (`tsc --noEmit`), `test` (`vitest run`, added 2026-10-13). |
 | CI / deployment config | `.github/workflows/ci.yml` added 2026-10-13 (not yet run on GitHub). No deployment config (`vercel.json` etc.). README says "Push to Vercel" — hosting is *Information Required*. |
@@ -106,7 +108,7 @@ Razorpay ──► POST /api/webhooks/razorpay (signature-checked, no Clerk auth
 | `/admin`, `/admin/users`, `/admin/rooms` (pages) | `requireAdmin` (Clerk public metadata `role: "admin"`; 404 otherwise) | Counts and audit log; dancer roster including real name and email (each view recorded); room list without message text |
 | `app/admin/actions.ts` `removeUser`, `removeRoom` | `requireAdmin` | Audit row first, then delete a dancer's profile, rooms and reveals (optionally banning the Clerk account), or delete one room |
 | `POST /api/rooms/[roomId]/read` | same | Read receipts |
-| `POST /api/rooms/[roomId]/timer` | same | Sets `timer_started_at` once both have sent a message |
+| ~~`POST /api/rooms/[roomId]/timer`~~ | — | Removed 2026-10-15 (DEC-014): chats have no time limit. `rooms.timer_started_at` stays in the schema and is no longer written |
 | `POST /api/payment/create-order` | `requireUserId` | Creates a Razorpay order, ₹29 fixed server-side, and a `payment_orders` ledger row, for a chat extension or for a reveal the other dancer has already allowed (refused otherwise, PAY-017) |
 | `POST /api/payment/verify` | `requireUserId` | HMAC check, ledger ownership check, payment fetched from Razorpay and checked (`captured`, order id, amount, currency), `fulfilOrder()`; returns `{ verified }` |
 | `POST /api/webhooks/razorpay` | Signature only | Skips an event id already in `webhook_events`; `payment.captured` → `fulfilOrder()`; `payment.failed` → ledger `failed`; then records the event id and outcome |
@@ -149,13 +151,12 @@ Classification of what exists today. "Implemented — unverified" means the code
 | Participant discovery | Implemented — unverified | `/api/users` + dashboard search/filter; no opt-out, no block filtering, 2000 cap. |
 | Online presence | Partial | Public Realtime channel `lobby` with client-chosen keys (`hooks/useLobbyPresence.ts:18`). |
 | One-to-one chat | Implemented — unverified | Room id derivation + `partnerFromRoomId` (`lib/room.ts`); writes via server. |
-| Chat timer start | Partial | Server checks both sent (`timer/route.ts:15-18`); "both have room open" is client-only (`ChatRoom.tsx:71-83`). |
-| Chat expiry | Partial | Enforced on send after start (`messages/route.ts:12`); no limit before the timer starts, and the timer may never start (CHAT-004). |
+| Chat timer start / expiry | Retired (DEC-014, 2026-10-15) | Chats have no time limit; the timer route, countdown and expiry check were removed. |
 | Realtime sync / reconnection | Partial | postgres_changes subscription; no resync of messages missed while disconnected. |
 | Read receipts | Partial | Works in the normal case; read-modify-write race on `read_by[]`. |
 | Blocking | Missing | — |
 | Reporting / moderation | Partial — admin console can remove dancers and rooms and block sign-in (ADMIN-002); no way for users to report yet | `app/admin/*`, `lib/admin.ts` |
-| Rate limiting / abuse prevention | Missing | — |
+| Rate limiting / abuse prevention | Partial (2026-10-15) | Per-user, in-memory limits on room creation, messages, payment routes and account actions (CHAT-007); middleware turns away blank and scanner user agents (SEC-005). Not shared between server instances. |
 | Age safeguards | Missing | — |
 | Account deletion / retention | Missing | No Clerk deletion webhook; no retention policy. |
 | Real name / email privacy from other browsers | Implemented — unverified | RLS own-row only; API selects public columns. |
@@ -193,10 +194,11 @@ Classification of what exists today. "Implemented — unverified" means the code
 - **Risks:** —
 
 ### CORE-003 — Two-minute conversation rule
+- **Retired 2026-10-15 by DEC-014 (user instruction):** chats are free and have no time limit. The server accepts a message in a room at any time (`app/api/rooms/[roomId]/messages/route.ts`; `tests/chat-messages.test.ts`, `tests/smoke/free-mode.test.ts`). `FREE_CHAT_MS`, `isExpired`, `extraSecondsFor`, `effectiveExtraSeconds`, the timer route, `useChatTimer`, `ChatTimer` and `TimerExpiredOverlay` were removed. Messaging is limited per sender by CHAT-007 instead. The text below is the former requirement.
 - **Requirement:** A room's clock starts once both participants have sent at least one message and both have the room open; after `120s + Σ granted extensions` the server rejects new messages. History remains readable to participants.
 - **Why:** This is the product's defining mechanic.
-- **Files:** `lib/room.ts` (`FREE_CHAT_MS`), `lib/server.ts` (`isExpired`), `app/api/rooms/[roomId]/timer/route.ts`, `hooks/useChatTimer.ts`.
-- **Status:** Partial — see CHAT-003, CHAT-004.
+- **Files:** Removed (see above).
+- **Status:** Retired (DEC-014).
 - **Depends on:** DEC-001 (what happens at expiry in Free Mode).
 - **Acceptance:** See CHAT-003/CHAT-004.
 - **Evidence:** See CHAT-003/CHAT-004. Expiry enforcement on send (403 after 120 s plus granted extensions, nothing written) is covered at route level by `tests/chat-expiry.test.ts` (database mocked), passing locally 2026-10-13.
@@ -284,7 +286,7 @@ Classification of what exists today. "Implemented — unverified" means the code
 - **Requirement:** Free Mode shows no prices, checkout buttons, "Secured by Razorpay" text, or marketing copy about paid unlocks. Each removed affordance is replaced by the Free Mode behaviour decided in DEC-001/DEC-002, never by a broken button.
 - **Why:** A coherent free experience; avoids advertising something that cannot be bought.
 - **Files:** `components/chat/ChatRoom.tsx:184-188` (Reveal ₹29), `components/chat/TimerExpiredOverlay.tsx:36-38` (Extend ₹29), `components/modals/RevealModal.tsx`, `ExtendModal.tsx`, `BottomSheet.tsx` (`RazorpayButton`), `components/landing/*` (on 2026-10-14 the ₹29 feature card in `FeaturesReveal.tsx` was replaced, the "Payments by Razorpay" footer line in `ClosingCta.tsx` was removed, and `StatsCounter.tsx` and `Testimonials.tsx` were deleted; `HeroSection.tsx` no longer makes a paid claim since its copy was rewritten the same day).
-- **Status:** Partial. Chat payment UI hidden (asserted by `tests/smoke/free-mode.test.ts` (TEST-007, in-process, providers mocked; not a browser or provider test)) in Free Mode (reveal button, reveal/extend sheets; the paid expiry button is replaced by "Back to dancers"). The reveal button and `RevealModal.tsx` were removed entirely on 2026-10-14 (DEC-002). The `FeaturesReveal` card "₹29 when it matters" was replaced on 2026-10-14 with one that makes no paid claim (`tests/refund-policy.test.ts`); later that day (DEC-008) `StatsCounter` and `Testimonials` were deleted and "Payments by Razorpay" was removed from the footer, so no landing component contains `₹`, `Razorpay`, `Pay` or `Unlock` (source search; rendered HTML not checked). Also since 2026-10-14 the `/refund-policy` page (GATE-004) and its footer link are shown in every mode and state the ₹29 price. GATE-004 needs that page published before Paid Mode can be enabled, while the acceptance below allows no `₹` on any Free Mode page; which rule yields for policy pages needs an owner decision.
+- **Status:** Partial. Chat payment UI hidden (asserted by `tests/smoke/free-mode.test.ts` (TEST-007, in-process, providers mocked; not a browser or provider test)) in Free Mode (reveal button, reveal/extend sheets; the paid expiry button is replaced by "Back to dancers"). The reveal button and `RevealModal.tsx` were removed entirely on 2026-10-14 (DEC-002). The `FeaturesReveal` card "₹29 when it matters" was replaced on 2026-10-14 with one that makes no paid claim (`tests/refund-policy.test.ts`); later that day (DEC-008) `StatsCounter` and `Testimonials` were deleted and "Payments by Razorpay" was removed from the footer, so no landing component contains `₹`, `Razorpay`, `Pay` or `Unlock` (source search; rendered HTML not checked). Since 2026-10-15 (DEC-014) the policy pages follow the effective mode: in Free Mode the footer has no Refund Policy link, `/refund-policy` says nothing is charged, and Terms and Privacy name no payment, price or Razorpay (`tests/legal-pages.test.ts`); in Paid Mode the paid terms are published as GATE-004 requires.
 - **Depends on:** CFG-004, DEC-001, DEC-002.
 - **Acceptance:** Search of rendered HTML for every Free Mode page finds no `₹`, `Razorpay`, `Pay`, `Unlock` strings; expiry and identity flows reach a defined end state.
 - **Evidence:** TEST-007 content assertions.
@@ -308,10 +310,11 @@ Classification of what exists today. "Implemented — unverified" means the code
 - **Risks:** Shipping the rollback-continuity path before the ledger exists would let signed-but-unexpected events grant entitlements. Building the Free Mode gate (no grants) does not depend on the ledger and should come first.
 
 #### FREE-005 — Coherent chat expiry in Free Mode
+- **Retired 2026-10-15 by DEC-014:** a chat no longer expires, so there is nothing to extend. The interim "Time's up" panel was removed.
 - **Requirement (DEC-001 decided 2026-10-13):** When a Free Mode chat expires, the history stays readable and each participant may choose "keep talking". The server grants +2 minutes only once **both** participants have agreed for that expiry; either may decline, and a decline or no response leaves the chat closed. Extension requests and agreements are recorded server-side and are free.
 - **Why:** The current overlay's only action is a ₹29 payment; extending a conversation with someone needs both people's agreement.
 - **Files:** `components/chat/TimerExpiredOverlay.tsx`, `ChatRoom.tsx`; server grant should reuse `chat_extensions` with a non-payment source (new migration, DATA-001).
-- **Status:** Missing (the mutual extension is not built). Interim closed state, 2026-10-13: when a Free Mode chat expires the thread stays readable and scrollable, the composer is replaced by a "Time's up" panel with "Back to dancers" (`components/chat/ChatRoom.tsx`), and the server refuses further messages (`tests/chat-expiry.test.ts`, `tests/smoke/free-mode.test.ts`).
+- **Status:** Retired (DEC-014). Before that: Missing (the mutual extension is not built). Interim closed state, 2026-10-13: when a Free Mode chat expires the thread stays readable and scrollable, the composer is replaced by a "Time's up" panel with "Back to dancers" (`components/chat/ChatRoom.tsx`), and the server refuses further messages (`tests/chat-expiry.test.ts`, `tests/smoke/free-mode.test.ts`).
 - **Depends on:** FREE-003, DATA-001. Open: limit on the number of free extensions per room; whether a one-sided request expires.
 - **Acceptance:** Tests: one agreement → no extra time; both agree → exactly +120 s, granted once even under concurrent requests; a request by a non-participant → 403; decline → chat remains closed; no paid affordance.
 - **Evidence:** TEST-003, TEST-007.
@@ -414,18 +417,20 @@ Classification of what exists today. "Implemented — unverified" means the code
 - **Risks:** —
 
 #### CHAT-003 — Timer start conditions enforced server-side
+- **Retired 2026-10-15 by DEC-014:** there is no clock to start; `POST /api/rooms/[roomId]/timer` was deleted.
 - **Requirement:** The server starts the clock only when both participants have sent a message **and** both are verifiably present, or the "both present" condition is formally dropped (DEC-001).
-- **Files:** `app/api/rooms/[roomId]/timer/route.ts` (checks messages only); presence check lives in `components/chat/ChatRoom.tsx:71-83`, based on a public presence channel.
-- **Status:** Partial.
+- **Files:** Removed.
+- **Status:** Retired (DEC-014).
 - **Depends on:** PRIV-005, DEC-001.
 - **Acceptance:** A `POST /timer` while the partner is not present does not start the clock (or the requirement is amended).
 - **Evidence:** TEST-003.
 - **Risks:** —
 
 #### CHAT-004 — The time limit cannot be sidestepped
+- **Retired 2026-10-15 by DEC-014:** there is no time limit to sidestep. The harassment concern it raised (unlimited one-sided messaging) now applies to every chat and is held back only by CHAT-007's per-sender rate limit until SAFE-001/002 exist.
 - **Requirement:** Define and enforce what limits messaging before the clock starts. Today, if the two participants are never in the room simultaneously, the timer never starts and they can exchange unlimited messages; a sender can also send unlimited messages to someone who never replies.
 - **Files:** `messages/route.ts:12` (expiry only checked after start), `ChatRoom.tsx:71-83`.
-- **Status:** Partial. By decision (DEC-002, second revision of 2026-10-14) a room that has been paid for has no time limit from the moment of payment: `rooms.unlimited` makes `isExpired` return false, whatever the partner later answers (`tests/chat-expiry.test.ts`, `tests/consent-flow.test.ts`). The other person is not asked about this and cannot undo it (R-13).
+- **Status:** Retired (DEC-014). Before that: Partial. By decision (DEC-002, second revision of 2026-10-14) a room that has been paid for has no time limit from the moment of payment: `rooms.unlimited` makes `isExpired` return false, whatever the partner later answers (`tests/chat-expiry.test.ts`, `tests/consent-flow.test.ts`). The other person is not asked about this and cannot undo it (R-13).
 - **Depends on:** DEC-001, CHAT-007.
 - **Acceptance:** Documented pre-start limit (e.g. N messages per sender before reply, or timer starts on first reply) enforced server-side and tested.
 - **Evidence:** TEST-003.
@@ -450,13 +455,13 @@ Classification of what exists today. "Implemented — unverified" means the code
 - **Risks:** Low.
 
 #### CHAT-007 — Rate limiting
-- **Requirement:** Per-user limits on message sends, room creation, timer calls, heartbeat, onboarding, and order creation.
-- **Files:** none.
-- **Status:** Missing.
-- **Depends on:** DEC on mechanism (database counter vs platform feature) — must not add infrastructure without justification.
+- **Requirement:** Per-user limits on message sends, room creation, heartbeat, onboarding, and order creation.
+- **Files:** `lib/rateLimit.ts` (`LIMITS`, `enforceRateLimit`, `hit`); `messages/route.ts`; `lib/server.ts` (`findOrCreateRoom`); `payment/create-order` and `payment/verify` (before the billing gate, with no database or Razorpay access); `consent/route.ts`; `me/heartbeat/route.ts`; `push/subscribe/route.ts`; `dashboard/actions.ts`.
+- **Status:** Partial (2026-10-15). Limits per signed-in user, per minute: 5 new rooms, 30 messages, 10 payment calls, 10 account actions (onboarding, nickname reroll, push subscribe/unsubscribe, consent answer, heartbeat). Over the limit a route answers 429 with `Retry-After`; `completeOnboarding` returns an error and `rerollDisplayName` skips the database. The request asked for per-IP limits; they are per user because many phones at one venue share a Wi-Fi or carrier address. Counts live in each server process's memory (no new infrastructure), so several instances each allow the full amount and a restart resets them. Not limited: `GET` routes, `read`, the Razorpay webhook (signature-authenticated) and admin actions.
+- **Depends on:** a shared store (e.g. Redis) for an exact cross-instance cap. That is new infrastructure and needs an owner decision.
 - **Acceptance:** Exceeding the limit returns 429; limits documented.
-- **Evidence:** TEST-003.
-- **Risks:** Spam and harassment during peak event hours.
+- **Evidence:** `tests/rate-limit.test.ts` (limiter windows; the sixth new room is refused and not created, while reopening is allowed; payment routes answer 429 after 10 calls with no database or Razorpay access; heartbeat), `tests/chat-messages.test.ts` (the 31st message gets 429 with `Retry-After`, per user). Passed locally 2026-10-15 with a mocked database; not yet run in CI.
+- **Risks:** Spam and harassment during peak event hours; per-instance counting weakens the cap on serverless hosting.
 
 #### NOTIF-001 — In-app new-message notifications
 - **Requirement (added 2026-10-14, maintainer instruction):** A signed-in user anywhere in the app is told when a message arrives in a chat they do not have open: a toast with the sender's nickname and the message, a short sound, a vibration, an unread count on that dancer's card and on the navbar, and a count in the tab title. It must use data the user is already allowed to read, and add no channel another user could listen on.
@@ -641,9 +646,10 @@ Everything in this section is **inactive until Paid Mode is effective** (CFG-002
 - **Risks:** No refund path for a `fulfilment_failed` reveal order (PAY-012, DEC-007). Razorpay's permission for this product is not established (GATE-003), and the legal review covers it (GATE-008).
 
 #### PAY-018 — A paid extension delivers its full time
+- **Retired 2026-10-15 by DEC-014:** chats have no time limit, so an extension changes nothing. `effectiveExtraSeconds`, `extraSecondsFor` and `tests/extension-time.test.ts` were removed. `lib/payments.ts` still inserts a `chat_extensions` row for an old `extend` order (Razorpay code left untouched); the row has no effect.
 - **Requirement (added 2026-10-14 after a defect found in a Razorpay test-mode run):** An extension gives the chat the full time bought. Paid for while time remains, it lengthens the chat by that much. Paid for after the chat has closed, it runs from the moment it was paid for, so time the chat sat closed, or the checkout took, is not deducted. Later extensions stack from wherever the chat's end then stands. The server decides; the client only displays it.
 - **Files:** `lib/room.ts` (`effectiveExtraSeconds`), `lib/server.ts` (`extraSecondsFor`, now reading `chat_extensions.paid_at`), `app/api/rooms/[roomId]/messages/route.ts`, `hooks/useChatTimer.ts` (progress bar measured against one free-chat window).
-- **Status:** Verified (unit). The defect: extension seconds were added to the chat's length counted from the clock's first start, so a payment made more than two minutes after expiry was recorded as paid, showed "+2 minutes added", and left the chat closed. Not yet re-run in Razorpay test mode.
+- **Status:** Retired (DEC-014). Before that: Verified (unit). The defect: extension seconds were added to the chat's length counted from the clock's first start, so a payment made more than two minutes after expiry was recorded as paid, showed "+2 minutes added", and left the chat closed. Not yet re-run in Razorpay test mode.
 - **Depends on:** PAY-003, CORE-003.
 - **Acceptance:** Tests: in-time extension adds exactly the bought time; late extension ends the chat that long after the payment; stacking and row order; before the clock starts; a message is accepted after a late payment and refused once that time has run out.
 - **Evidence:** `tests/extension-time.test.ts` (12 tests). Passed locally 2026-10-14; not yet run in CI.
@@ -701,12 +707,21 @@ Razorpay onboarding and product eligibility are **unresolved**. The ability to c
 
 #### SEC-004 — Input validation
 - **Requirement:** All route inputs validated for type and size; IDs validated for format before use.
-- **Files:** route handlers (ad-hoc casts like `as Record<string,string>`); `app/(main)/dashboard/actions.ts` (`completeOnboarding`).
-- **Status:** Partial. `completeOnboarding` stores `branch` and `collegeYear` trimmed but with no length cap or allow-list, and `vibeTag` as free text up to 50 characters, although the UI offers fixed choices; all three are shown to every signed-in user.
+- **Files:** `lib/validation.ts` (`parseBody`: Zod schema, fixed 400 message that never echoes the parser's description); schemas in `messages/route.ts`, `consent/route.ts`, `me/heartbeat/route.ts`, `push/subscribe/route.ts` (POST and DELETE), and `app/(main)/dashboard/actions.ts` (`OnboardingInput`).
+- **Status:** Partial (2026-10-15). Every request body read by a non-payment route handler, and the onboarding action's argument, is parsed by a Zod schema before use. Not converted, per the instruction not to touch Razorpay code behind the billing gate: `create-order` and `verify` (they already narrow without casts) and the Razorpay webhook (raw body, signature checked first). Still open: allow-lists for `branch`, `collegeYear` and `vibeTag` (now only size-capped at 100, 100 and 200 characters before the existing trimming); route path ids are checked by `partnerFromRoomId`, not by a schema.
 - **Depends on:** —
 - **Acceptance:** Malformed-input tests return 400, never 500.
-- **Evidence:** TEST-003.
+- **Evidence:** `tests/chat-messages.test.ts` (no body, malformed JSON, wrong types, blank text and over 1000 characters all get 400 with nothing written), `tests/rate-limit.test.ts` (consent and heartbeat bodies), `tests/push.test.ts` (subscription bodies, unchanged and passing). Passed locally 2026-10-15; not yet run in CI.
 - **Risks:** —
+
+#### SEC-005 — HTTP security headers and request screening
+- **Requirement (added 2026-10-15, user instruction):** Every response carries a Content-Security-Policy limited to the app's own origin and its providers (Clerk, Supabase, Razorpay Checkout), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy: camera=(), microphone=(), geolocation=()` and `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`. Middleware turns away requests with a blank or known-scanner User-Agent, adds any missing header to its own responses, and redirects plain-http requests to https in production.
+- **Files:** `lib/securityHeaders.mjs` (+ `.d.mts`), `next.config.mjs` (`headers()`; Next 14 does not support `next.config.ts`), `middleware.ts`, `lib/requestGuards.ts`.
+- **Status:** Implemented — unverified for signed-in pages. Clerk's Frontend API host is read from the publishable key and Supabase's from its URL, with wildcard fallbacks when unset; only a plain host name is ever copied into the header. Scripts need `'unsafe-inline'` because Next 14 inlines bootstrap scripts without a nonce. Webhooks under `/api/webhooks/` are exempt from the User-Agent check. The https redirect skips `localhost` and bare-IP hosts.
+- **Depends on:** DEP-001 (the production domain: `includeSubDomains; preload` binds every subdomain of it).
+- **Acceptance:** Unit tests of the header values and guards; the production build serves the headers; the app's pages load in a browser with no CSP violation.
+- **Evidence:** `tests/security-headers.test.ts` (21 tests, passed locally 2026-10-15). Manual run 2026-10-15 against `next start` with this machine's development keys: all six headers on pages and static files, one CSP header per response; blank and `sqlmap` User-Agents got 403; a webhook with a blank User-Agent reached the route; no redirect for `localhost`. Headless Edge loaded `/`, `/sign-in` (Clerk's sign-in card rendered), `/terms` and `/refund-policy` with no CSP violation in the console. **Not checked:** signed-in pages (dashboard and chat: Supabase Realtime over `wss`, Clerk session token), Razorpay Checkout, push subscription, and the production Clerk domain.
+- **Risks:** A provider adding a new origin breaks that feature until the policy is updated; HSTS preload is hard to undo once submitted.
 
 #### PRIV-001 — Real name and email private by default
 - **Requirement:** `real_name` and `email` are never returned to anyone except the user themself, and to another participant only via ID-001 consent. **Admin exception (DEC-011, 2026-10-14):** an admin (ADMIN-001) may see them in the admin roster for moderation; each view is recorded first (ADMIN-003), and they are never sent to any non-admin.
@@ -903,9 +918,10 @@ Razorpay onboarding and product eligibility are **unresolved**. The ability to c
 - **Risks:** —
 
 #### DATA-004 — Timer state monotonic
+- **Retired 2026-10-15 by DEC-014:** nothing writes `timer_started_at` any more.
 - **Requirement:** `timer_started_at` is set once and never moved; extensions only add.
-- **Files:** `timer/route.ts:21` (`.is('timer_started_at', null)` guard ✓).
-- **Status:** Implemented — unverified.
+- **Files:** Removed (`timer/route.ts`).
+- **Status:** Retired (DEC-014).
 - **Depends on:** —
 - **Acceptance:** Concurrent `POST /timer` test yields one value.
 - **Evidence:** TEST-003.
@@ -1017,7 +1033,7 @@ A phase is complete only when its exit criteria have **evidence**; planning or d
 | **R-4** | No payment ledger: no audit trail, no reconciliation, no failed/refunded state. *Partly mitigated 2026-10-14: `payment_orders` records created/paid/failed; still no event audit trail, reconciliation or refunded state.* | High | PAY-003, PAY-013 |
 | **R-5** | No block, report, age gate or rate limit in a stranger-chat product. | High | SAFE-001…004, CHAT-007 |
 | **R-6** | Public Realtime presence channels leak online Clerk ids and allow presence spoofing. | Medium | PRIV-005 |
-| **R-7** | The 2-minute limit can be sidestepped by never being co-present; unlimited one-sided messages. | Medium | CHAT-003, CHAT-004 |
+| **R-7** | The 2-minute limit can be sidestepped by never being co-present; unlimited one-sided messages. *Superseded 2026-10-15 (DEC-014): there is no time limit. Unlimited messaging now applies to every chat, capped only at 30 messages a minute per sender (CHAT-007); see R-5.* | Medium | CHAT-007, SAFE-001 |
 | **R-8** | Fabricated stats/testimonials and inaccurate privacy copy. *Landing stats, testimonials and the reveal claim removed 2026-10-14 (DEC-008).* Remaining: copy review; event-scoped wording without an event model. | Medium → Low | PRIV-006 |
 | **R-9** | Payment routes always active; missing keys → 500s; credentials effectively enable payments. *Mitigated 2026-10-13 for routes and chat UI; landing copy and preview-environment live-key detection remain.* | Low | CFG-001…004, FREE-003 |
 | **R-10** | No tests or CI; every status above is unverified. *Partly mitigated 2026-10-13: unit, route and in-process smoke tests exist; CI is defined but has not run on GitHub; no browser or provider tests.* | Medium | TEST-* |
@@ -1051,6 +1067,7 @@ Known limitations of the Free Mode gate, tracked here so they are not mistaken f
 | **DEC-010** | Approved price and products (₹29 is a proposal) | Business decision after GATE-001/003. Products: ₹29 Connect (unlimited chat + mutual contact consent), ₹29 Reveal (name and photo reveal upon recipient allow). |
 | **DEC-011** | Admin access to user data | **Decided 2026-10-14 (maintainer instruction):** admins marked by `role: "admin"` in Clerk public metadata may see real names and emails in the roster and remove dancers and rooms; every view and action is audited (`ADMIN-001..003`). |
 | **DEC-012** | Paid name-and-photo reveal | **Decided 2026-10-14 (maintainer):** requester asks for free, partner allows or declines, and only after an allow can requester pay ₹29 to see name and photo. Email is never shared. (`PAY-017`, `ID-001`). **Superseded 2026-10-14 by DEC-013:** no new request, allow or purchase is possible. |
+| **DEC-014** | Free, with no chat time limit | **Decided 2026-10-15 (user instruction):** `BILLING_MODE` set to `free` in the developer's `.env.local` (each deployment's own setting is the owner's to change), and the two-minute chat limit removed from the code in every mode: no timer, countdown, expiry or extension. The payment sections of Terms and Privacy, the Refund Policy's paid terms and the footer's Refund Policy link appear only in effective Paid Mode. Razorpay code behind the billing gate is left untouched. Retires CORE-003, CHAT-003, CHAT-004, FREE-005, PAY-018 and DATA-004. **Conflict left open:** the paid `connect` product (DEC-002) sells "unlimited chat" plus a contact request. With no time limit the unlimited half is worth nothing, yet the checkout sheet, Terms and Refund Policy (Paid Mode only) still describe it. Paid Mode must not be enabled until DEC-002 and DEC-010 are revisited. |
 | **DEC-013** | Who may request identity | **Decided 2026-10-14 (user instruction):** only a paying user may request. The ₹29 connect payment is the only way to ask the other dancer for anything: it unlocks unlimited chat and sends the request for real name and email (DEC-002). Removed the same day: the free "Ask to see name & photo" request, the partner's allow/decline for it, the separate ₹29 name-and-photo purchase (`POST /api/rooms/[roomId]/reveal`, `RevealPanel`, `RevealModal`, `notifyRevealRequest`), and `create-order` now refuses `reveal` and `extend`. Kept: reveals already granted still show (chat `sharedWithMe`, dancer list), and a `reveal` or `extend` order created before the change is still fulfilled if its payment lands. `reveal_requests` is left untouched. Supersedes DEC-012 for anything new. |
 
 ### Information required
@@ -1080,7 +1097,7 @@ Status abbreviations: **V** Verified (scope in brackets, e.g. unit/route level) 
 |---|---|---|---|---|---|---|
 | CORE-001 | Free Mode default, fully functional | app-wide | P | in-process smoke | Browser-level smoke | FREE-003 |
 | CORE-002 | Server authoritative | `lib/server.ts`, `app/api/**` | P | TEST-003 | Fix CHAT-003 | PRIV-005 |
-| CORE-003 | Two-minute rule | `lib/room.ts`, `timer/route.ts`, `messages/route.ts`, `lib/server.ts` (`isExpired`) | P | `tests/chat-expiry.test.ts` (expiry on send; paid-for rooms exempt) | See CHAT-003/004 | DEC-001, DEC-002 |
+| CORE-003 | Two-minute rule | removed | Retired (DEC-014) | `tests/chat-messages.test.ts`, smoke (no limit) | — | DEC-014 |
 | CFG-001 | `BILLING_MODE` resolution | `lib/billing.ts` | V (unit) | `tests/billing.test.ts` | Run in CI | TEST-006 |
 | CFG-002 | Paid fails closed | `lib/billing.ts`, `lib/razorpay.ts` | P | `tests/billing.test.ts`, `tests/payment-routes.test.ts` | Stricter live-key environment check | DEP-001 |
 | CFG-003 | Credentials ≠ paid | `lib/billing.ts`, payment routes | V (route) | `tests/payment-routes.test.ts`, `tests/smoke/free-mode.test.ts` | Browser-level check | — |
@@ -1088,9 +1105,9 @@ Status abbreviations: **V** Verified (scope in brackets, e.g. unit/route level) 
 | CFG-005 | Supabase config validation | `lib/supabase*.ts` | M | unit test | Add validator | — |
 | FREE-001 | Runs without Razorpay env | app-wide | P | clean-worktree build and tests with no provider env | Run CI on GitHub; browser smoke | TEST-006 |
 | FREE-002 | No gateway contact | `useRazorpay.ts`, `lib/razorpay.ts` | IU | `razorpay()` refusal; smoke asserts no SDK/fetch | Browser network capture | — |
-| FREE-003 | No paid UI/claims | chat, landing (2026-10-14) | P | smoke (chat); `tests/refund-policy.test.ts` (`FeaturesReveal`); source search (landing) | Rendered-HTML assertion for the landing page (TEST-007); policy-page rule | PRIV-006 |
+| FREE-003 | No paid UI/claims | chat, landing (2026-10-14), policy pages and footer (2026-10-15) | P | smoke (chat); `tests/refund-policy.test.ts` (`FeaturesReveal`); `tests/legal-pages.test.ts` (Free Mode pages and footer); source search (landing) | Rendered-HTML assertion for the landing page (TEST-007) | PRIV-006 |
 | FREE-004 | Billing endpoints inert; webhook grants only verified paid-era ledger orders | `app/api/payment/*`, webhook | P | `tests/payment-routes.test.ts`, smoke | Continuity path after ledger (FU-001) | PAY-003/006/011 |
-| FREE-005 | Free mutual +2 min extension at expiry | `ChatRoom.tsx` (interim closed panel) | M | smoke + `tests/chat-expiry.test.ts` (closed state only) | Build mutual-agreement flow | DATA-001; cap open |
+| FREE-005 | Free mutual +2 min extension at expiry | removed | Retired (DEC-014) | — | — | DEC-014 |
 | FREE-006 | No identity sharing offered in Free Mode; free exchange unbuilt | `create-order`, `ChatRoom.tsx` | IU / Retired | `tests/reveal.test.ts`, smoke | Reveal flow gated to Paid Mode; free contact exchange retired | DEC-002, DEC-012 |
 | FREE-007 | Non-destructive switching | `extraSecondsFor`, `lib/consent.ts`, consent route | IU | `tests/smoke/free-mode.test.ts` (render only) | Mode-flip integration test | DEC-003 |
 | FREE-008 | Config ≠ approval | process | M | change record | Adopt §20 | GATE-* |
@@ -1101,11 +1118,11 @@ Status abbreviations: **V** Verified (scope in brackets, e.g. unit/route level) 
 | DISC-002 | Presence integrity | `useLobbyPresence.ts` | P | TEST-005 | See PRIV-005 | PRIV-005 |
 | CHAT-001 | 1:1 room access | `lib/room.ts`, `loadRoom` | IU | TEST-003 | Write tests | — |
 | CHAT-002 | Message integrity | `messages/route.ts`, RLS | IU | TEST-005 | Write tests | — |
-| CHAT-003 | Timer start server-enforced | `timer/route.ts`, `ChatRoom.tsx:71-83` | P | TEST-003 | Server presence or amend | PRIV-005, DEC-001 |
-| CHAT-004 | Limit not sidestepped | `messages/route.ts` | P | TEST-003; `tests/consent-flow.test.ts` (unlimited from payment, not before) | Define pre-start rule; R-13 | DEC-001, SAFE-001 |
+| CHAT-003 | Timer start server-enforced | removed | Retired (DEC-014) | — | — | DEC-014 |
+| CHAT-004 | Limit not sidestepped | removed | Retired (DEC-014) | — | Harassment risk moves to CHAT-007, SAFE-001 | DEC-014 |
 | CHAT-005 | Reconnect resync | `useSupabaseRealtime.ts` | P | E2E/manual | Refetch on resubscribe | — |
 | CHAT-006 | Read receipts consistent | `read/route.ts` | P | review | Atomic append | — |
-| CHAT-007 | Rate limiting | — | M | TEST-003 | Choose mechanism | — |
+| CHAT-007 | Rate limiting | `lib/rateLimit.ts`, routes, `actions.ts` | P | `tests/rate-limit.test.ts`, `tests/chat-messages.test.ts` | Shared store for a cross-instance cap (owner decision) | — |
 | NOTIF-001 | In-app message notifications | `MessageNotifier.tsx`, `useAppStore.ts` | IU | manual two-account run | Do the run; persist unread | SEC-003 |
 | NOTIF-002 | Web Push via service worker | `lib/push.ts`, `api/push/subscribe`, `public/sw.js`, `0006_push_subscriptions.sql` | IU | `tests/push.test.ts`, `tests/chat-expiry.test.ts` | Apply 0006, set `VAPID_*`, two-device run | DATA-001, CHAT-007, SAFE-001 |
 | PAY-001 | Mode-gated billing | payment routes, `ChatRoom.tsx` | P | `tests/payment-routes.test.ts` | Landing copy | FREE-003 |
@@ -1125,7 +1142,7 @@ Status abbreviations: **V** Verified (scope in brackets, e.g. unit/route level) 
 | PAY-015 | Replay protection | `verify/route.ts`, ledger | V (unit) | `tests/payment-routes.test.ts` | Run in CI | PAY-003 |
 | PAY-016 | Pre-checkout disclosure | `ConnectModal.tsx`, `TimerExpiredOverlay.tsx` | P | `tests/refund-policy.test.ts`; review outstanding | Terms/Privacy links; copy review | GATE-004 Terms/Privacy links added 2026-10-14. |
 | PAY-017 | Paid reveal needs prior agreement | `create-order/route.ts`, `lib/payments.ts`, `lib/reveal.ts`, `0008_reveal_requests.sql` | V (unit) | `tests/payment-routes.test.ts` | Apply 0008; Razorpay test-mode run; refunds | ID-001/002, PAY-012, GATE-003 Retired for new orders (DEC-013); fulfilment of earlier orders only. |
-| PAY-018 | Extension delivers its full time | `lib/room.ts`, `lib/server.ts`, `useChatTimer.ts` | V (unit) | `tests/extension-time.test.ts` | Re-run in Razorpay test mode | PAY-003, CORE-003 |
+| PAY-018 | Extension delivers its full time | removed | Retired (DEC-014) | — | — | DEC-014 |
 | GATE-001…003 | Razorpay eligibility, KYC, use case | external | IR | written confirmation | Contact Razorpay | — |
 | GATE-004 | Policies published | `app/(main)/refund-policy/page.tsx` | P | live URLs (none yet); `tests/refund-policy.test.ts` | Terms, Privacy, cancellation; deploy; legal review | GATE-008 Terms + Privacy pages added 2026-10-14. |
 | GATE-005 | Live creds/webhook config | external | IR | env audit | — | GATE-002 |
@@ -1135,7 +1152,8 @@ Status abbreviations: **V** Verified (scope in brackets, e.g. unit/route level) 
 | SEC-001 | Secrets server-side | `lib/*` `server-only` | IU | bundle-name scan step in CI workflow; clean in local simulation (Clerk SDK's own `CLERK_SECRET_KEY` lookup excluded) | Run on GitHub | TEST-006 |
 | SEC-002 | AuthZ before service role | all `supabaseAdmin()` callers | IU | TEST-003 | Write tests | — |
 | SEC-003 | RLS correct | migration | IU | TEST-005 | Local Supabase tests | IR: live config |
-| SEC-004 | Input validation | route handlers, `actions.ts` | P | TEST-003 | Validate inputs; allow-list `branch`/`collegeYear`/`vibeTag` | — |
+| SEC-004 | Input validation | `lib/validation.ts`, route handlers, `actions.ts` | P | `tests/chat-messages.test.ts`, `tests/rate-limit.test.ts`, `tests/push.test.ts` | Allow-list `branch`/`collegeYear`/`vibeTag`; payment routes when Paid Mode is revisited | — |
+| SEC-005 | Security headers, request screening | `lib/securityHeaders.mjs`, `next.config.mjs`, `middleware.ts`, `lib/requestGuards.ts` | IU (unit + manual, public pages) | `tests/security-headers.test.ts`; headless-Edge run 2026-10-15 | Browser check of signed-in pages and the production Clerk domain | DEP-001 |
 | PRIV-001 | Name/email private (admin roster excepted, DEC-011) | `lib/consent.ts` (`getRevealedContact`), `lib/reveal.ts` (`getRevealed`, `listRevealed`), `app/admin/users/page.tsx` | V (unit) | `tests/consent-flow.test.ts`, `tests/campus-privacy.test.ts`, `tests/reveal.test.ts`, `tests/admin.test.ts` | Real-database RLS test | ID-001, DEC-011 |
 | PRIV-002 | No IDOR | `room.ts`, routes | IU | TEST-003/004 | Write tests | — |
 | PRIV-003 | No PII in logs | `lib/server.ts:23` | P | review | Sanitise | OPS-001 |
@@ -1156,7 +1174,7 @@ Status abbreviations: **V** Verified (scope in brackets, e.g. unit/route level) 
 | DATA-001 | Migrations only | `supabase/migrations/` (0001–0008) | P | schema diff | Adopt CLI; apply 0006-0008; README lists all migrations | IR: live DB |
 | DATA-002 | Entitlement linkage | migration | P | TEST-005 | With PAY-003 | PAY-003 |
 | DATA-003 | User referential integrity | migration | P | integration | With PRIV-004 | PRIV-004 |
-| DATA-004 | Timer monotonic | `timer/route.ts:21` | IU | TEST-003 | Write test | — |
+| DATA-004 | Timer monotonic | removed | Retired (DEC-014) | — | — | DEC-014 |
 | API-001 | Consistent contracts | `lib/server.ts` | P | TEST-003 | Error codes | — |
 | API-002 | Route inventory | §3.3 | IU | TEST-003 | Route-table test | TEST-001 |
 | OPS-001…006 | Ops | see §13 | M/P | see §13 | see §13 | — |

@@ -2,9 +2,25 @@
 
 import { auth, currentUser } from '@clerk/nextjs/server';
 import { revalidatePath } from 'next/cache';
+import { z } from 'zod';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { generateDisplayName, isGeneratedName } from '@/lib/displayNames';
+import { hit } from '@/lib/rateLimit';
 import type { Gender } from '@/lib/types';
+
+// A server action is a public endpoint: its argument is checked before use (SEC-004).
+// The caps only bound the size; the fields are trimmed and shortened further below.
+const OnboardingInput = z.object({
+  gender: z.enum(['male', 'female', 'other']),
+  displayName: z.string(),
+  realName: z.string().max(200).optional(),
+  email: z.string().max(254).optional(),
+  branch: z.string().max(100).optional(),
+  collegeYear: z.string().max(100).optional(),
+  vibeTag: z.string().max(200).optional(),
+  outfitColor: z.string().max(300).optional(),
+  instagramHandle: z.string().max(100).optional(),
+});
 
 async function nameTaken(name: string, excludeClerkId?: string) {
   let query = supabaseAdmin().from('users').select('id').eq('display_name', name);
@@ -16,7 +32,10 @@ async function nameTaken(name: string, excludeClerkId?: string) {
 }
 
 export async function rerollDisplayName() {
-  if (!auth().userId) throw new Error('Unauthorised');
+  const { userId } = auth();
+  if (!userId) throw new Error('Unauthorised');
+  // Past the limit, skip the database: completeOnboarding still checks the name is free (CHAT-007).
+  if (hit('account', userId) > 0) return generateDisplayName();
   for (let i = 0; i < 5; i++) {
     const n = generateDisplayName();
     if (!(await nameTaken(n))) return n;
@@ -24,7 +43,7 @@ export async function rerollDisplayName() {
   return generateDisplayName();
 }
 
-export async function completeOnboarding(input: {
+export async function completeOnboarding(raw: {
   gender: Gender;
   displayName: string;
   realName?: string;
@@ -37,7 +56,10 @@ export async function completeOnboarding(input: {
 }) {
   const { userId } = auth();
   if (!userId) return { error: 'Sign in first' };
-  if (!['male', 'female', 'other'].includes(input.gender)) return { error: 'Pick a gender' };
+  if (hit('account', userId) > 0) return { error: 'Too many attempts. Wait a minute and try again.' };
+  const parsed = OnboardingInput.safeParse(raw);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.path[0] === 'gender' ? 'Pick a gender' : 'Check your profile details and try again.' };
+  const input = parsed.data;
 
   const cleanDisplayName = input.displayName.trim();
   if (!cleanDisplayName || cleanDisplayName.length < 2 || cleanDisplayName.length > 35) {

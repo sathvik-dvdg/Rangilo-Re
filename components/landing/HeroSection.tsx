@@ -67,7 +67,7 @@ export function HeroSection() {
               Find a Garba partner at tonight&apos;s event — no waiting, no awkward circles.
             </p>
             <p className="text-sm leading-relaxed text-paper/70 sm:text-base">
-              Join, browse who is dancing tonight, and start a private two-minute chat. Made for Navratri nights.
+              Join, browse who is dancing tonight, and start a private chat. Made for Navratri nights.
             </p>
           </motion.div>
 

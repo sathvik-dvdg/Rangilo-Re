@@ -160,7 +160,7 @@ describe('a paid request that is waiting for an answer', () => {
     expect(await (await getConnections()).json()).toEqual({ revealed: {}, incoming: [] });
   });
 
-  it('the chat is open at once: a message is accepted long past the two minutes while the request is still pending', async () => {
+  it('the chat is open: a message is accepted an hour in while the request is still pending', async () => {
     db.rowsOf('rooms')[0].timer_started_at = hoursAgo(1);
     const res = await sendMessage(post({ text: 'hello' }), room);
     expect(res.status).toBe(200);
@@ -390,8 +390,8 @@ describe('a database without migration 0006', () => {
     expect((await contactOf(BOB)).status).toBe(404);
   });
 
-  it('still enforces the two-minute limit', async () => {
+  it('still accepts messages: chats have no time limit (DEC-014)', async () => {
     db.rowsOf('rooms')[0].timer_started_at = hoursAgo(1);
-    expect((await sendMessage(post({ text: 'hello' }), room)).status).toBe(403);
+    expect((await sendMessage(post({ text: 'hello' }), room)).status).toBe(200);
   });
 });

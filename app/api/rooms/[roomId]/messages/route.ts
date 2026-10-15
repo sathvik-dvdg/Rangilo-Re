@@ -1,19 +1,21 @@
-import { HttpError, errorResponse, extraSecondsFor, isExpired, loadRoom, requireUserId } from '@/lib/server';
+import { z } from 'zod';
+import { errorResponse, loadRoom, requireUserId } from '@/lib/server';
 import { notifyNewMessage } from '@/lib/push';
+import { enforceRateLimit } from '@/lib/rateLimit';
+import { parseBody } from '@/lib/validation';
+
+// Matches the messages.text check constraint (1–1000 characters).
+const MessageBody = z.object({ text: z.string().trim().min(1).max(1000) });
 
 export async function POST(req: Request, { params }: { params: { roomId: string } }) {
   try {
     const userId = requireUserId();
+    enforceRateLimit('message', userId);
     const roomId = decodeURIComponent(params.roomId);
-    const { text } = (await req.json().catch(() => ({}))) as { text?: string };
-    const clean = (text ?? '').trim().slice(0, 1000);
-    if (!clean) throw new HttpError(400, 'Empty message');
+    const { text: clean } = await parseBody(req, MessageBody, 'A message must be 1 to 1000 characters');
 
-    const { db, room, me, partnerId } = await loadRoom(roomId, userId);
-    // A room that has been paid for (unlimited) never expires.
-    if (isExpired(room.timer_started_at, await extraSecondsFor(roomId, room.timer_started_at), room.unlimited)) {
-      throw new HttpError(403, 'Chat time is up');
-    }
+    // Chats have no time limit (DEC-014); loadRoom still restricts the room to its two dancers.
+    const { db, me, partnerId } = await loadRoom(roomId, userId);
 
     const { data, error } = await db
       .from('messages')

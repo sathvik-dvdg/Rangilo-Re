@@ -3,11 +3,14 @@
  * other and to the Refund Policy, and are linked from the footer and from
  * checkout. The privacy text must match what the app stores and shows
  * (PRIV-006): every field onboarding collects is named, and so is admin access.
+ * Payment terms, payment data and Razorpay appear only in effective Paid Mode
+ * (FREE-003); in Free Mode the pages make no payment claim.
  * This checks the published text only; it is not a legal review (GATE-008).
  */
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { inMode } from './helpers/billingMode';
 import TermsPage from '@/app/(main)/terms/page';
 import PrivacyPage from '@/app/(main)/privacy/page';
 import RefundPolicyPage from '@/app/(main)/refund-policy/page';
@@ -15,16 +18,19 @@ import { ClosingCta } from '@/components/landing/ClosingCta';
 import { ConnectModal } from '@/components/modals/ConnectModal';
 
 const render = (el: React.ReactElement) => renderToStaticMarkup(el).replace(/\s+/g, ' ');
-const terms = render(TermsPage());
-const privacy = render(PrivacyPage());
+const terms = inMode('paid', () => render(TermsPage()));
+const privacy = inMode('paid', () => render(PrivacyPage()));
+const freeTerms = inMode('free', () => render(TermsPage()));
+const freePrivacy = inMode('free', () => render(PrivacyPage()));
 const link = (href: string) => new RegExp(`<a[^>]*href="${href}"`);
 
 describe('all three policy pages share one layout', () => {
   it.each([
-    ['Terms of Service', terms],
-    ['Privacy Policy', privacy],
-    ['Refund Policy', render(RefundPolicyPage())],
-  ])('%s: title, date, back link and support address', (title, html) => {
+    ['Terms of Service', 'Terms of Service', terms],
+    ['Privacy Policy', 'Privacy Policy', privacy],
+    ['Refund Policy', 'Refund Policy', inMode('paid', () => render(RefundPolicyPage()))],
+    ['Refund Policy (Free Mode)', 'Refund Policy', inMode('free', () => render(RefundPolicyPage()))],
+  ])('%s: title, date, back link and support address', (_page, title, html) => {
     expect(html).toContain(`>${title}</h1>`);
     expect(html).toContain('Last updated: October 2026');
     expect(html).toMatch(link('/'));
@@ -100,9 +106,40 @@ describe('Privacy Policy', () => {
   });
 });
 
+describe('Free Mode: no payment claims on the policy pages (FREE-003, PRIV-006)', () => {
+  const PAYMENT = /₹|Razorpay|payment records|Payment data|>Payments<|>Refunds<|Refund Policy/;
+
+  it('Terms has no Payments or Refunds section and says nothing about a time limit', () => {
+    expect(freeTerms).not.toMatch(PAYMENT);
+    expect(freeTerms).not.toMatch(/two minutes|time limit/);
+    expect(freeTerms).toContain('>What GarbaConnect is</h2>');
+    expect(freeTerms).toMatch(/never shown to other dancers unless you agree to share them\./);
+    expect(freeTerms).toMatch(link('/privacy'));
+  });
+
+  it('Privacy names no payment data and no payment provider, and still names every other service', () => {
+    expect(freePrivacy).not.toMatch(PAYMENT);
+    for (const service of ['Clerk', 'Supabase', 'push service']) expect(freePrivacy).toContain(service);
+    expect(freePrivacy).toMatch(/where your profile and messages are stored/);
+    expect(freePrivacy).toMatch(link('/terms'));
+  });
+
+  it('the Refund Policy page says nothing is charged', () => {
+    const html = inMode('free', () => render(RefundPolicyPage()));
+    expect(html).toMatch(/We do not take any payments at the moment, so there is nothing to refund/);
+    expect(html).not.toMatch(/₹|Razorpay|unlimited/i);
+  });
+
+  it('the footer links to Terms and Privacy only', () => {
+    const footer = inMode('free', () => renderToStaticMarkup(ClosingCta()));
+    for (const href of ['/terms', '/privacy']) expect(footer).toMatch(link(href));
+    expect(footer).not.toMatch(link('/refund-policy'));
+  });
+});
+
 describe('links', () => {
-  it('the footer links to all three policies', () => {
-    const footer = renderToStaticMarkup(ClosingCta());
+  it('the footer links to all three policies in Paid Mode', () => {
+    const footer = inMode('paid', () => renderToStaticMarkup(ClosingCta()));
     for (const href of ['/terms', '/privacy', '/refund-policy']) expect(footer).toMatch(link(href));
   });
 

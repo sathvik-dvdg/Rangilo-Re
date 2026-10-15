@@ -10,9 +10,9 @@ const features = [
     icon: 'M12 3a4 4 0 1 1 0 8 4 4 0 0 1 0-8Zm-7 18c0-3.9 3.1-7 7-7s7 3.1 7 7M3 3l18 18',
   },
   {
-    title: 'Two minutes to click',
-    body: 'The clock only starts once both of you have spoken and both are in the room. No ghosting a timer.',
-    icon: 'M12 7v5l3 2M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18Z',
+    title: 'Talk as long as you like',
+    body: 'No timer on your chat. Keep talking until you have found each other on the floor.',
+    icon: 'M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12Z',
   },
   {
     title: 'Rooms for two',
@@ -20,9 +20,9 @@ const features = [
     icon: 'M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm8 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM2 20c0-3 2.7-5 6-5s6 2 6 5m0-5c.6-.1 1.3-.1 2-.1 3.3 0 6 2 6 5',
   },
   {
-    title: 'Then the clock stops',
-    body: 'When time runs out the chat closes to new messages. What you already said to each other stays where it is.',
-    icon: 'M7 3h10M7 21h10M8 3c0 5 8 5 8 9s-8 4-8 9M16 3c0 5-8 5-8 9s8 4 8 9',
+    title: 'See who is on the floor',
+    body: 'Dancers with the app open right now are marked online, so you message someone who is actually there.',
+    icon: 'M12 12h.01M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8',
   },
 ];
 

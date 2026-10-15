@@ -1,12 +1,21 @@
+import { z } from 'zod';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { HttpError, errorResponse, requireUserId } from '@/lib/server';
 import { MAX_SUBSCRIPTIONS_PER_USER, getPushConfig, isAllowedPushEndpoint } from '@/lib/push';
-import { isRecord } from '@/lib/utils';
+import { enforceRateLimit } from '@/lib/rateLimit';
+import { parseBody } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
 
 // Browser push keys are unpadded base64url: p256dh is 65 bytes, auth is 16.
 const KEY = /^[A-Za-z0-9_-]{16,200}={0,2}$/;
+
+// PushSubscription.toJSON(); unknown fields such as expirationTime are dropped.
+const SubscribeBody = z.object({
+  endpoint: z.string().refine(isAllowedPushEndpoint),
+  keys: z.object({ p256dh: z.string().regex(KEY), auth: z.string().regex(KEY) }),
+});
+const UnsubscribeBody = z.object({ endpoint: z.string().max(1024) });
 
 /** Whether this server can send push, and the public key a browser needs to subscribe. */
 export async function GET() {
@@ -23,15 +32,11 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const userId = requireUserId();
+    enforceRateLimit('account', userId);
     if (!getPushConfig()) throw new HttpError(503, 'Notifications are not set up on this server');
 
-    const body: unknown = await req.json().catch(() => null);
-    const keys = isRecord(body) && isRecord(body.keys) ? body.keys : null;
-    if (!isRecord(body) || !keys || !isAllowedPushEndpoint(body.endpoint)) throw new HttpError(400, 'Invalid subscription');
-    const { p256dh, auth } = keys;
-    if (typeof p256dh !== 'string' || typeof auth !== 'string' || !KEY.test(p256dh) || !KEY.test(auth)) {
-      throw new HttpError(400, 'Invalid subscription');
-    }
+    const body = await parseBody(req, SubscribeBody, 'Invalid subscription');
+    const { p256dh, auth } = body.keys;
 
     const db = supabaseAdmin();
     // A browser has one subscription; whoever is signed in there now owns it.
@@ -62,9 +67,8 @@ export async function POST(req: Request) {
 export async function DELETE(req: Request) {
   try {
     const userId = requireUserId();
-    const body: unknown = await req.json().catch(() => null);
-    const endpoint = isRecord(body) ? body.endpoint : null;
-    if (typeof endpoint !== 'string' || endpoint.length > 1024) throw new HttpError(400, 'Invalid subscription');
+    enforceRateLimit('account', userId);
+    const { endpoint } = await parseBody(req, UnsubscribeBody, 'Invalid subscription');
     const { error } = await supabaseAdmin().from('push_subscriptions').delete().eq('user_id', userId).eq('endpoint', endpoint);
     if (error) throw error;
     return Response.json({ ok: true });

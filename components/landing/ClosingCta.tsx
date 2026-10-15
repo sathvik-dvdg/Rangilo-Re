@@ -1,8 +1,11 @@
 import Link from 'next/link';
+import { isBillingEnabled } from '@/lib/billing';
 import { buttonVariants } from '@/components/ui/button';
 import { Mark } from '@/components/ui/Mark';
 
 export function ClosingCta() {
+  // The Refund Policy link appears only when payments are on (FREE-003).
+  const billing = isBillingEnabled();
   return (
     <>
       <section className="bg-haldi py-24 text-ink">
@@ -26,9 +29,11 @@ export function ClosingCta() {
             <Link href="/privacy" className="underline underline-offset-4 hover:text-paper">
               Privacy
             </Link>
-            <Link href="/refund-policy" className="underline underline-offset-4 hover:text-paper">
-              Refund Policy
-            </Link>
+            {billing && (
+              <Link href="/refund-policy" className="underline underline-offset-4 hover:text-paper">
+                Refund Policy
+              </Link>
+            )}
           </nav>
         </div>
       </footer>

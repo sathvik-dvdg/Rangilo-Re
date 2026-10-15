@@ -27,7 +27,7 @@ const cards = [
   {
     n: '03',
     title: 'Connect Privately',
-    body: 'Open a private room for exactly two dancers. Once you both say hi, a two-minute clock starts.',
+    body: 'Open a private room for exactly two dancers. Say hi and find each other on the floor.',
     tone: 'bg-neel text-paper',
     scrim: 'from-neel via-neel/75 to-neel/40',
     clip: '/videos/garba-night-3',

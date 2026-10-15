@@ -1,6 +1,6 @@
 # GarbaConnect
 
-A Navratri / Garba partner-finding app. Dancers sign up, get a generated nickname, browse who else is at the garba, and chat one-to-one. A two-minute clock starts once both people have spoken.
+A Navratri / Garba partner-finding app. Dancers sign up, get a generated nickname, browse who else is at the garba, and chat one-to-one. It is free, and chats have no time limit.
 
 **The app is free by default.** It runs with no payment setup at all. Payments are an optional mode that is switched off unless explicitly configured, and are not approved for production use yet (see [Billing modes](#billing-modes)).
 
@@ -16,7 +16,7 @@ Pre-launch. Nothing here has been tested against real providers end to end or on
 
 Known gaps that block a public launch (details and IDs in `OBJECTIVES.md` §17 and §20):
 
-- No blocking, reporting, age confirmation or rate limiting yet.
+- No blocking, reporting or age confirmation yet. Rate limits exist but are counted per server instance (CHAT-007).
 - The landing page still shows placeholder statistics, testimonials and ₹29 claims that need replacing.
 - Only a paying user can ask for anyone's identity: the ₹29 connect payment is the only request there is, and the other dancer must accept it (`OBJECTIVES.md` DEC-002, DEC-013). Rows in the old payer-only `reveals` table are not shown; what to do with them is undecided (DEC-003).
 - Realtime presence channels are public.
@@ -113,13 +113,13 @@ app/
   (main)/dashboard                 dancer list, onboarding sheet, server actions
   (main)/chat/[roomId]             chat room
   api/users                        public profile list (no name/email)
-  api/rooms/[roomId]               room state; /messages, /read, /timer, /consent (answer a request to share contact details)
+  api/rooms/[roomId]               room state; /messages, /read, /consent (answer a request to share contact details)
   api/users/[userId]/contact       real name + email, only after both agreed (404 otherwise)
   api/reveals                      who you are connected with, and who is waiting for your answer
   api/payment/create-order|verify  Razorpay order + signature check (Paid Mode only)
   api/webhooks/razorpay            signature-checked webhook (grants only in Paid Mode)
 components/3d | landing | dashboard | chat | modals | layout | ui
-hooks/  useChatTimer, useFocusTrap, useLenis, useLobbyPresence, useRazorpay, useSupabase, useSupabaseRealtime
+hooks/  useFocusTrap, useLenis, useLobbyPresence, useRazorpay, useSupabase, useSupabaseRealtime
 lib/    billing, supabase (browser), supabaseAdmin, razorpay, payments, consent, server, displayNames, room
 store/  useAppStore (zustand)
 tests/  billing, payment-routes, consent-flow, chat-expiry, campus-privacy, refund-policy, smoke/free-mode
@@ -131,16 +131,15 @@ docs/   ui-ux-audit.md
 - The browser can't read another user's `real_name` or `email` from the database. The only RLS policy on `users` lets you read your own row, and the dancer list comes from `/api/users`, which selects public columns only.
 - Two people see each other's real name and email only after one has paid and the other has accepted the request to share them. The server returns those two fields, and nothing else, when a `contact_reveals` row exists for the pair (`lib/consent.ts`). A payment on its own never reveals anything.
 - Nothing about identity or payments is kept in `localStorage`, `sessionStorage` or cookies; it comes from the server on every load.
-- All writes (messages, timer start, read receipts) go through route handlers that use the service-role key after checking who is calling. The browser client only reads what RLS allows and listens on Realtime.
+- All writes (messages, read receipts) go through route handlers that use the service-role key after checking who is calling. The browser client only reads what RLS allows and listens on Realtime.
 - Secrets stay server-side: modules that read them import `server-only`, and the only `NEXT_PUBLIC_*` values are public identifiers: the Clerk publishable key and route URLs, the Supabase URL and anon key, and the Razorpay key id.
 - Not yet true, and tracked in `OBJECTIVES.md`: revoking a contact exchange and choosing which fields to share (ID-003), private Realtime channels (PRIV-005), account deletion and retention (PRIV-004).
 
 ### Chat rules
 
 - A room id is the sorted pair of both Clerk ids, so only those two people can open it.
-- The clock starts once both dancers have sent a message and both have the room open. The server sets `rooms.timer_started_at` once. (The "both have the room open" part is currently checked in the browser only; see CHAT-003.)
-- Remaining time is `120s + granted extensions − elapsed`. After that the server refuses new messages.
-- In Free Mode an expired chat stays readable: the message box is replaced by a "Time's up" panel with a way back to the dancer list. A free extension that both people agree to is planned (FREE-005).
+- Chats have no time limit (DEC-014, 2026-10-15). `rooms.timer_started_at` and `chat_extensions` are still in the schema but nothing uses them.
+- Each dancer may open 5 new rooms and send 30 messages a minute (`lib/rateLimit.ts`); past that the server answers 429.
 
 ## Design
 
@@ -167,7 +166,10 @@ Typography is Cinzel for display and Nunito for UI, both self-hosted through Fon
 
 - Clerk v5 deprecated `authMiddleware`, so `middleware.ts` uses `clerkMiddleware` with a route matcher instead.
 - The R3F canvas uses `frameloop="always"` while the hero is on screen and `"never"` once it scrolls away. `"demand"` would freeze the mandala animation.
-- The chat page passes the server's render time to the timer, and message times are formatted in the browser, so server and browser markup match.
+- Message times are formatted in the browser, so server and browser markup match.
+- Security headers (CSP, HSTS, framing, referrer, permissions) are defined once in `lib/securityHeaders.mjs`, sent by `next.config.mjs` on every response and added by `middleware.ts` to its own. The CSP reads the Clerk and Supabase hosts from `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `NEXT_PUBLIC_SUPABASE_URL`; a new third-party origin must be added there.
+- `middleware.ts` answers 403 to a blank or known-scanner User-Agent (except `/api/webhooks/*`) and, in production, redirects plain http to https.
+- Request bodies are parsed with Zod (`lib/validation.ts`) before use.
 
 ## Deploy
 

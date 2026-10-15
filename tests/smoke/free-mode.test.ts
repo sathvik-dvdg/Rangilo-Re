@@ -55,15 +55,13 @@ const FAKE = {
 const PAYMENT_UI = [/₹/, /Razorpay/i, /Reveal Identity/i, /Extend Chat/i, /Unlock/i, /\bPay\b/, /Connect ₹/];
 const NO_REQUEST: RoomConsent = { status: null, role: null, canRequest: true };
 
-function roomState(timerStartedAt: string | null): RoomState {
+function roomState(): RoomState {
   const profile = (clerk_id: string, display_name: string) => ({ clerk_id, display_name, gender: 'female' as const, last_seen: new Date().toISOString() });
   return {
     roomId: ROOM,
     me: profile('user_alice', 'DiyaDancer_Avni_4821'),
     partner: profile('user_bob', 'GarbaKing_Arjun_7302'),
     messages: [],
-    timerStartedAt,
-    extraSeconds: 0,
     unlimited: false,
     consent: NO_REQUEST,
     revealed: null,
@@ -117,32 +115,27 @@ describe('Free Mode smoke (in-process, providers mocked)', () => {
     expect(getBillingStatus()).toEqual({ mode: 'free', requested: 'free', problems: [] });
   });
 
-  it('chat page renders with no payment UI before the clock starts', async () => {
-    room.state = roomState(null);
+  it('chat page renders with no payment UI and no countdown', async () => {
+    room.state = roomState();
     const html = await renderChat();
     expect(html).toContain('GarbaKing_Arjun_7302');
-    expect(html).toContain('aria-label="Message"'); // the composer is there while the chat is open
+    expect(html).toContain('aria-label="Message"');
     for (const pattern of PAYMENT_UI) expect(html).not.toMatch(pattern);
+    expect(html).not.toMatch(/2-minute|Chat closes in|Clock starts/);
   });
 
-  it('expired chat offers no paid extension, only a way back', async () => {
+  it('a chat that began an hour ago is still open: no time limit (DEC-014)', async () => {
     const started = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-    room.state = {
-      ...roomState(started),
-      messages: [{ id: 'm1', room_id: ROOM, sender_id: 'user_bob', text: 'That is me', created_at: started, read_by: ['user_bob'] }],
-    };
+    room.state = { ...roomState(), messages: bothSpoke(started) };
     const html = await renderChat();
-    expect(html).toContain('Your 2-minute chat has ended');
-    expect(html).toContain('Back to dancers');
+    expect(html).toContain('aria-label="Message"');
+    expect(html).not.toMatch(/disabled=""[^>]*aria-label="Message"|aria-label="Message"[^>]*disabled=""/);
+    expect(html).not.toMatch(/Time&#x27;s up|Chat closed|has ended/);
     for (const pattern of PAYMENT_UI) expect(html).not.toMatch(pattern);
-    // Readable, not writable: the composer is gone, not merely disabled.
-    expect(html).not.toContain('<form');
-    expect(html).not.toContain('aria-label="Message"');
-    expect(html).toContain('That is me'); // the thread itself is still rendered
   });
 
   it('a name and photo shared before the free ask was retired still shows, with no payment UI', async () => {
-    room.state = { ...roomState(null), sharedWithMe: { real_name: 'Arjun Mehta', image_url: null } };
+    room.state = { ...roomState(), sharedWithMe: { real_name: 'Arjun Mehta', image_url: null } };
     const html = await renderChat();
     expect(html).toContain('Arjun Mehta');
     expect(html).toContain('Shared with you');
@@ -179,7 +172,7 @@ describe('Free Mode smoke (in-process, providers mocked)', () => {
 
   it('a request paid for before a rollback can still be answered, in a chat that stays open, with no payment UI (FREE-007)', async () => {
     room.state = {
-      ...roomState(new Date(Date.now() - 60 * 60 * 1000).toISOString()),
+      ...roomState(),
       unlimited: true,
       consent: { status: 'pending', role: 'partner', canRequest: false },
     };
@@ -193,7 +186,7 @@ describe('Free Mode smoke (in-process, providers mocked)', () => {
 
   it('a connected room renders with the partner’s details, no countdown and no payment UI', async () => {
     room.state = {
-      ...roomState(new Date(Date.now() - 60 * 60 * 1000).toISOString()),
+      ...roomState(),
       unlimited: true,
       consent: { status: 'accepted', role: 'requester', canRequest: false },
       revealed: { real_name: 'Arjun Mehta', email: 'arjun@example.com' },
@@ -201,9 +194,8 @@ describe('Free Mode smoke (in-process, providers mocked)', () => {
     const html = await renderChat();
     expect(html).toContain('Arjun Mehta');
     expect(html).toContain('arjun@example.com');
-    expect(html).toContain('no time limit');
-    expect(html).toContain('aria-label="Message"'); // an hour past the start and still open
-    expect(html).not.toContain('Your 2-minute chat has ended');
+    expect(html).toContain('Connected');
+    expect(html).toContain('aria-label="Message"');
     for (const pattern of PAYMENT_UI) expect(html).not.toMatch(pattern);
   });
 
@@ -212,29 +204,24 @@ describe('Free Mode smoke (in-process, providers mocked)', () => {
 
 describe('control: the same render in Paid Mode does show payment UI', () => {
   // Proves the absence checks above can fail. Rendering only; no payment is attempted.
-  it('the offer appears when Paid Mode is effective, and says details are shared only if the partner accepts, with no refund on a decline', async () => {
+  // The terms of the offer are in the checkout sheet, rendered open in tests/legal-pages.test.ts (PAY-016).
+  it('the offer appears when Paid Mode is effective, and nothing retired comes back', async () => {
     vi.stubEnv('BILLING_MODE', 'paid');
-    room.state = roomState(new Date(Date.now() - 60 * 60 * 1000).toISOString());
+    room.state = roomState();
     const html = await renderChat();
     expect(html).not.toMatch(/Reveal Identity/i);
     expect(html).not.toMatch(/Extend Chat/i);
     expect(html).not.toMatch(/See them ₹29/);
     expect(html).toMatch(/Connect ₹29/);
-    expect(html).toContain('Nothing is shared unless they accept');
-    expect(html).toContain('the chat stays open and there is no refund');
-    // The offer is never a dead end: a visible way back sits next to it (not just the header icon's label).
-    expect(html).toMatch(/>Back to dancers<\/a>/);
   });
 
-  it('after payment the chat is open with no offer and no expiry overlay, whatever the partner answers', async () => {
+  it('after payment the chat is open with no offer, whatever the partner answers', async () => {
     vi.stubEnv('BILLING_MODE', 'paid');
-    const longAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     for (const status of ['pending', 'declined', 'expired'] as const) {
-      room.state = { ...roomState(longAgo), unlimited: true, consent: { status, role: 'requester', canRequest: false } };
+      room.state = { ...roomState(), unlimited: true, consent: { status, role: 'requester', canRequest: false } };
       const html = await renderChat();
       expect(html).not.toMatch(/₹/);
-      expect(html).not.toMatch(/Time&#x27;s Up|Time's Up|Your 2-minute chat has ended|refund/i);
-      expect(html).toContain('Unlimited chat');
+      expect(html).not.toMatch(/Time&#x27;s Up|Time's Up|refund/i);
       expect(html).toContain('aria-label="Message"');
       expect(html).toContain(
         status === 'pending'
@@ -249,7 +236,7 @@ describe('control: the same render in Paid Mode does show payment UI', () => {
   it('in Paid Mode the only way to ask is to pay: no free request for a name and photo (DEC-013)', async () => {
     vi.stubEnv('BILLING_MODE', 'paid');
     const now = new Date().toISOString();
-    room.state = { ...roomState(now), messages: bothSpoke(now) };
+    room.state = { ...roomState(), messages: bothSpoke(now) };
     const html = await renderChat();
     expect(html).toMatch(/Connect ₹29/);
     expect(html).not.toMatch(/Ask to see name|You can ask|See them ₹29|is asking to see your/i);

@@ -3,7 +3,8 @@ import { auth } from '@clerk/nextjs/server';
 import { supabaseAdmin } from './supabaseAdmin';
 import { diagnoseDbError } from './dbDiagnosis';
 import { getRevealedContact, getRoomConsent, isMissingSchema } from './consent';
-import { FREE_CHAT_MS, effectiveExtraSeconds, partnerFromRoomId } from './room';
+import { partnerFromRoomId } from './room';
+import { enforceRateLimit } from './rateLimit';
 import { getRevealed } from './reveal';
 import type { MyProfile, PublicProfile, RoomState } from './types';
 
@@ -14,7 +15,7 @@ export const CAMPUS_PUBLIC_COLUMNS = 'clerk_id, display_name, gender, branch, co
 export const CAMPUS_OWN_COLUMNS = 'clerk_id, display_name, gender, branch, college_year, vibe_tag, outfit_color, last_seen, real_name, email, instagram_handle';
 
 export class HttpError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(public status: number, message: string, public headers?: Record<string, string>) {
     super(message);
   }
 }
@@ -26,7 +27,7 @@ export function requireUserId() {
 }
 
 export function errorResponse(e: unknown) {
-  if (e instanceof HttpError) return Response.json({ error: e.message }, { status: e.status });
+  if (e instanceof HttpError) return Response.json({ error: e.message }, { status: e.status, headers: e.headers });
   console.error(e);
   const d = diagnoseDbError(e);
   if (d) {
@@ -109,42 +110,31 @@ export async function loadRoom(roomId: string, userId: string) {
   distinct.add(userId);
   if (distinct.size > 2) throw new HttpError(403, 'Room is full');
 
-  const room = await findOrCreateRoom(roomId, [userId, partnerId].sort());
+  const room = await findOrCreateRoom(roomId, [userId, partnerId].sort(), userId);
   return { db, me, partner, partnerId, room };
 }
 
-type RoomRow = { id: string; timer_started_at: string | null; unlimited: boolean };
+type RoomRow = { id: string; unlimited: boolean };
 
-const ROOM_COLUMNS = 'id, participant_ids, timer_started_at, unlimited';
-const ROOM_COLUMNS_BEFORE_0006 = 'id, participant_ids, timer_started_at';
+const ROOM_COLUMNS = 'id, participant_ids, unlimited';
+const ROOM_COLUMNS_BEFORE_0006 = 'id, participant_ids';
 
-async function findOrCreateRoom(roomId: string, participantIds: string[], columns = ROOM_COLUMNS): Promise<RoomRow> {
+async function findOrCreateRoom(roomId: string, participantIds: string[], userId: string, columns = ROOM_COLUMNS): Promise<RoomRow> {
   const db = supabaseAdmin();
   const found = await db.from('rooms').select(columns).eq('id', roomId).maybeSingle();
+  // Only creating a room counts against the limit (CHAT-007); reopening one never does.
+  if (!found.error && !found.data) enforceRateLimit('roomCreate', userId);
   const result =
     found.error || found.data
       ? found
       : await db.from('rooms').upsert({ id: roomId, participant_ids: participantIds }, { onConflict: 'id' }).select(columns).single();
   if (result.error) {
     // rooms.unlimited arrives with migration 0006. Without it no room is unlimited.
-    if (columns === ROOM_COLUMNS && isMissingSchema(result.error)) return findOrCreateRoom(roomId, participantIds, ROOM_COLUMNS_BEFORE_0006);
+    if (columns === ROOM_COLUMNS && isMissingSchema(result.error)) return findOrCreateRoom(roomId, participantIds, userId, ROOM_COLUMNS_BEFORE_0006);
     throw result.error;
   }
-  const row = result.data as unknown as { id: string; timer_started_at: string | null; unlimited?: boolean };
-  return { id: row.id, timer_started_at: row.timer_started_at, unlimited: row.unlimited === true };
-}
-
-/** Seconds the room's extensions add beyond the free time, measured from the clock's start (see effectiveExtraSeconds). */
-export async function extraSecondsFor(roomId: string, timerStartedAt: string | null) {
-  const { data, error } = await supabaseAdmin().from('chat_extensions').select('extra_seconds, paid_at').eq('room_id', roomId);
-  if (error) throw error;
-  return effectiveExtraSeconds(timerStartedAt, (data ?? []) as { extra_seconds: number; paid_at: string }[]);
-}
-
-/** A room that has been paid for is unlimited and never expires. */
-export function isExpired(timerStartedAt: string | null, extraSeconds: number, unlimited = false) {
-  if (unlimited || !timerStartedAt) return false;
-  return Date.now() - new Date(timerStartedAt).getTime() >= FREE_CHAT_MS + extraSeconds * 1000;
+  const row = result.data as unknown as { id: string; unlimited?: boolean };
+  return { id: row.id, unlimited: row.unlimited === true };
 }
 
 export async function getRoomState(roomId: string, userId: string): Promise<RoomState> {
@@ -152,14 +142,13 @@ export async function getRoomState(roomId: string, userId: string): Promise<Room
   // `revealed` (contact flow) comes only from a contact_reveals row for this pair.
   // Rows in the old payer-only `reveals` table are no longer read or shown (DEC-003).
   // `sharedWithMe` is a name-and-photo reveal granted before that flow was retired (DEC-013).
-  const [{ data: messages, error }, extraSeconds, consent, revealed, sharedWithMe] = await Promise.all([
+  const [{ data: messages, error }, consent, revealed, sharedWithMe] = await Promise.all([
     db
       .from('messages')
       .select('id, room_id, sender_id, text, created_at, read_by')
       .eq('room_id', roomId)
       .order('created_at', { ascending: true })
       .limit(500),
-    extraSecondsFor(roomId, room.timer_started_at),
     getRoomConsent(roomId, userId),
     getRevealedContact(userId, partnerId),
     getRevealed(userId, partnerId),
@@ -170,8 +159,6 @@ export async function getRoomState(roomId: string, userId: string): Promise<Room
     me,
     partner,
     messages: messages ?? [],
-    timerStartedAt: room.timer_started_at,
-    extraSeconds,
     unlimited: room.unlimited,
     consent,
     revealed,

@@ -67,8 +67,8 @@ export async function sendPushToUser(userId: string, message: PushMessage): Prom
         try {
           await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh as string, auth: s.auth as string } }, JSON.stringify(message), {
             vapidDetails: config,
-            // A chat lasts two minutes, so a notification that arrives later than that is noise.
-            TTL: 120,
+            // Chats have no time limit (DEC-014); after an hour the message is stale news.
+            TTL: 3600,
             urgency: 'high',
             timeout: SEND_TIMEOUT_MS,
           });

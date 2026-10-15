@@ -1,12 +1,29 @@
 import type { Metadata } from 'next';
+import { isBillingEnabled } from '@/lib/billing';
 import { PolicyPage, Section, SupportEmail } from '@/components/legal/Policy';
 
 export const metadata: Metadata = {
   title: 'Refund Policy — GarbaConnect',
-  description: 'What the ₹29 payment buys, when it is refunded and how to reach us.',
+  description: 'When a payment is refunded and how to reach us.',
 };
 
+/** The paid terms are published only in effective Paid Mode (FREE-003); otherwise the page says nothing is charged. */
 export default function RefundPolicyPage() {
+  if (!isBillingEnabled()) {
+    return (
+      <PolicyPage eyebrow="Payments" title="Refund Policy">
+        <Section title="GarbaConnect is free">
+          <p>We do not take any payments at the moment, so there is nothing to refund.</p>
+        </Section>
+
+        <Section title="Contact">
+          <p>
+            <SupportEmail /> — for any questions.
+          </p>
+        </Section>
+      </PolicyPage>
+    );
+  }
   return (
     <PolicyPage eyebrow="Payments" title="Refund Policy">
       <Section title="What you're paying for">
