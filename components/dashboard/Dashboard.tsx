@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@clerk/nextjs';
 import { motion } from 'framer-motion';
 import { FixedSizeList, type ListChildComponentProps } from 'react-window';
-import { Search, Lock, Unlock, Shield } from 'lucide-react';
+import { Search, Lock, Shield } from 'lucide-react';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/button';
 import { GenderBadge } from '@/components/ui/GenderBadge';
@@ -32,6 +32,8 @@ const YEAR_OPTIONS = ['All Years', '1st Year', '2nd Year', '3rd Year', '4th Year
 // Phone: a flat list, one dancer per row. Laptop: bordered cards, two per row when there is room.
 // Two-up cards are narrower, so their tags wrap onto a third line and the row is taller.
 const ROW = 96;
+/** How often the dancer list is refetched from the server while the tab is visible. */
+const USERS_REFRESH_MS = 30_000;
 const ROW_TWO_UP = 116;
 const DESKTOP_QUERY = '(min-width: 1024px)';
 const TWO_COLUMN_MIN_WIDTH = 680;
@@ -100,22 +102,11 @@ function DancerCard({ u, index, data }: { u: PublicProfile; index: number; data:
         </div>
 
         <div className="min-w-0 flex-1 border-b border-paper/[0.07] pb-2 pt-2 lg:border-b-0 lg:py-0">
-          {/* Top line: real name if they shared it (else nickname), Connect/Shared badge, Gender, Branch, Vibe */}
+          {/* Top line: real name if they shared it (else nickname), request badge, Gender, Branch, Vibe */}
           <div className="flex items-center gap-1.5 flex-wrap">
             <p className="truncate font-display text-[15px] font-semibold text-paper" title={shared?.real_name ? u.display_name : undefined}>
               {shared?.real_name ? shared.real_name : u.display_name}
             </p>
-            {shared?.email && (
-              <span className="flex items-center gap-1 rounded bg-[#7FB069]/20 border border-[#7FB069]/30 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#9CC587]">
-                <Unlock className="h-2.5 w-2.5" />
-                Connected
-              </span>
-            )}
-            {shared && !shared.email && (
-              <span className="rounded bg-[#7FB069]/20 border border-[#7FB069]/30 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#9CC587]">
-                Shared with you
-              </span>
-            )}
             {wantsToConnect && (
               <span className="rounded border border-haldi/50 bg-haldi/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-haldi">
                 Wants to connect
@@ -204,6 +195,30 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
       .catch(() => {});
   }, [me, attempt]);
 
+  // Keep the list current (new dancers, profile edits, last seen) by refetching it from the
+  // server every few seconds. Skipped while the tab is hidden or a refetch is still running;
+  // a failed refetch keeps the list already on screen.
+  useEffect(() => {
+    if (!me) return;
+    let inFlight = false;
+    const id = window.setInterval(() => {
+      if (inFlight || document.visibilityState !== 'visible') return;
+      inFlight = true;
+      fetch('/api/users', { cache: 'no-store' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d: { users?: PublicProfile[] } | null) => {
+          if (!d?.users) return;
+          setUsers(d.users);
+          setError(null);
+        })
+        .catch(() => {})
+        .finally(() => {
+          inFlight = false;
+        });
+    }, USERS_REFRESH_MS);
+    return () => window.clearInterval(id);
+  }, [me]);
+
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     return (users ?? [])
@@ -282,7 +297,7 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
         <Lock className="h-3 w-3" />
       </span>
       <p className="leading-snug">
-        <strong className="text-haldi font-bold">Anonymous Lobby:</strong> All dancer profiles are locked. Tap anyone to start a 2-min chat.
+        <strong className="text-haldi font-bold">Anonymous Lobby:</strong> All dancer profiles are locked. Tap anyone to start a private chat.
       </p>
     </div>
   );
