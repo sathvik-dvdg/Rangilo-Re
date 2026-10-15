@@ -5,11 +5,12 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@clerk/nextjs';
 import { motion } from 'framer-motion';
 import { FixedSizeList, type ListChildComponentProps } from 'react-window';
-import { Ban, EllipsisVertical, Search, Lock, Shield } from 'lucide-react';
+import { Ban, EllipsisVertical, Flag, Search, Lock, Shield } from 'lucide-react';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/button';
 import { GenderBadge } from '@/components/ui/GenderBadge';
 import { Toast } from '@/components/ui/Toast';
+import { BottomSheet } from '@/components/modals/BottomSheet';
 import { CampusEnergyBattle } from './CampusEnergyBattle';
 import { NotificationToggle } from './NotificationToggle';
 import { OnboardingModal } from './OnboardingModal';
@@ -54,6 +55,8 @@ type RowData = {
   open: (u: PublicProfile) => void;
   /** Blocks the dancer (SAFE-001); the card leaves the list at once. */
   block: (u: PublicProfile) => void;
+  /** Opens the report form for the dancer (SAFE-002). */
+  report: (u: PublicProfile) => void;
 };
 
 function Row({ index, style, data }: ListChildComponentProps<RowData>) {
@@ -72,7 +75,7 @@ function DancerCard({ u, index, data }: { u: PublicProfile; index: number; data:
   const wantsToConnect = data.incoming.has(u.clerk_id);
   const unread = data.unread[u.clerk_id] ?? 0;
 
-  // Actions (block): the ⋯ button, a long press on touch screens, or a right click.
+  // Actions (report, block): the ⋯ button, a long press on touch screens, or a right click.
   const [menuOpen, setMenuOpen] = useState(false);
   const card = useRef<HTMLDivElement>(null);
   const pressTimer = useRef<number | null>(null);
@@ -225,6 +228,18 @@ function DancerCard({ u, index, data }: { u: PublicProfile; index: number; data:
             role="menuitem"
             onClick={() => {
               setMenuOpen(false);
+              data.report(u);
+            }}
+            className="flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-semibold text-paper/85 hover:bg-paper/10"
+          >
+            <Flag className="h-3.5 w-3.5" />
+            Report
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setMenuOpen(false);
               data.block(u);
             }}
             className="flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-semibold text-[#F0A69C] hover:bg-kumkum/20"
@@ -257,6 +272,41 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
   const [editOpen, setEditOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' } | null>(null);
   const clearToast = useCallback(() => setToast(null), []);
+
+  // Reporting a dancer (SAFE-002): a short reason, sent to the team for review.
+  const [reporting, setReporting] = useState<PublicProfile | null>(null);
+  const [reason, setReason] = useState('');
+  const [reportBusy, setReportBusy] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const openReport = useCallback((u: PublicProfile) => {
+    setReporting(u);
+    setReason('');
+    setReportError(null);
+  }, []);
+  const closeReport = useCallback(() => setReporting(null), []);
+  const sendReport = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reporting || reportBusy) return;
+    setReportBusy(true);
+    setReportError(null);
+    try {
+      const res = await fetch('/api/reports', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reportedUserId: reporting.clerk_id, reason }),
+      });
+      if (!res.ok) {
+        setReportError(((await res.json().catch(() => ({}))) as { error?: string }).error ?? 'Could not send the report. Try again.');
+        return;
+      }
+      setReporting(null);
+      setToast({ message: 'Report sent. Thank you for telling us.', tone: 'success' });
+    } catch {
+      setReportError('Could not send the report. Try again.');
+    } finally {
+      setReportBusy(false);
+    }
+  };
 
   // Blocking takes the card off the list at once and puts it back if the server refuses (SAFE-001).
   const blockDancer = useCallback(async (u: PublicProfile) => {
@@ -395,8 +445,9 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
       unread,
       open: (u) => userId && router.push(`/chat/${encodeURIComponent(roomIdFor(userId, u.clerk_id))}`),
       block: (u) => void blockDancer(u),
+      report: openReport,
     };
-  }, [visible, cols, onlineIds, revealed, incoming, unread, userId, router, blockDancer]);
+  }, [visible, cols, onlineIds, revealed, incoming, unread, userId, router, blockDancer, openReport]);
 
   const lobbyNotice = (
     <div className="flex items-center gap-2 rounded-xl border border-haldi/20 bg-ink-2/80 px-3.5 py-2 text-xs text-paper/75 shadow-sm lg:bg-ink/60">
@@ -643,6 +694,44 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
         }}
         onClose={() => setEditOpen(false)}
       />
+      <BottomSheet open={reporting !== null} onClose={closeReport}>
+        {reporting && (
+          <form onSubmit={sendReport} className="space-y-4 pb-2">
+            <div>
+              <h2 className="font-display text-xl text-paper">Report {reporting.display_name}</h2>
+              <p className="mt-1 text-sm text-paper/65">Tell us what happened. Our team reviews every report, and they are not told who reported them.</p>
+            </div>
+            <div>
+              <label htmlFor="report-reason" className="sr-only">
+                What happened
+              </label>
+              <textarea
+                id="report-reason"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                maxLength={500}
+                rows={4}
+                placeholder="What happened? (optional)"
+                className="block w-full resize-none rounded-xl border border-paper/15 bg-ink px-4 py-3 text-[15px] text-paper placeholder:text-paper/35 focus:border-haldi focus:outline-none"
+              />
+              <p className="tabular mt-1 text-right text-[11px] text-paper/45">{reason.length}/500</p>
+            </div>
+            {reportError && (
+              <p role="alert" className="text-sm text-[#E58A7F]">
+                {reportError}
+              </p>
+            )}
+            <div className="flex gap-3">
+              <Button type="button" variant="outline" className="flex-1" onClick={closeReport}>
+                Cancel
+              </Button>
+              <Button type="submit" variant="haldi" className="flex-1" disabled={reportBusy}>
+                {reportBusy ? 'Sending…' : 'Send report'}
+              </Button>
+            </div>
+          </form>
+        )}
+      </BottomSheet>
       <Toast message={toast?.message ?? null} tone={toast?.tone} onDone={clearToast} />
     </main>
   );

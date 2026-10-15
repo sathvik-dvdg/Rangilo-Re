@@ -23,6 +23,8 @@ export const LIMITS = {
   payment: { limit: 10, windowMs: 60_000 },
   /** Blocking and unblocking (SAFE-001). */
   block: { limit: 10, windowMs: 60_000 },
+  /** Reporting a dancer (SAFE-002). */
+  report: { limit: 5, windowMs: 60_000 },
   /** Onboarding, nickname rerolls, push subscriptions, consent answers, presence heartbeats. */
   account: { limit: 10, windowMs: 60_000 },
 } satisfies Record<string, Limit>;

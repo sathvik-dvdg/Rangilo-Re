@@ -83,7 +83,7 @@ describe('Privacy Policy', () => {
   });
 
   it('names everything onboarding and the app collect, not just name and email (PRIV-006)', () => {
-    for (const field of ['real name', 'email', 'profile photo', 'nickname', 'gender', 'branch and year', 'vibe tag', 'outfit', 'Instagram handle', 'chat messages', 'last online', 'notifications', 'who you have blocked']) {
+    for (const field of ['real name', 'email', 'profile photo', 'nickname', 'gender', 'branch and year', 'vibe tag', 'outfit', 'Instagram handle', 'chat messages', 'last online', 'notifications', 'who you have blocked', 'reports you send']) {
       expect(privacy).toContain(field);
     }
   });

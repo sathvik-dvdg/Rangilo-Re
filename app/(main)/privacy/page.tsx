@@ -36,6 +36,10 @@ export default function PrivacyPage() {
           <li>
             <strong className="text-paper">Blocks:</strong> who you have blocked. Nobody, including the person you block, is told who blocked them.
           </li>
+          <li>
+            <strong className="text-paper">Reports:</strong> reports you send about another dancer, with the reason you give. Our team reads them;
+            the person you report is not told who reported them.
+          </li>
           {billing && (
             <li>
               <strong className="text-paper">Payments:</strong> order IDs, amounts and payment status (see Payment data below).

@@ -128,6 +128,7 @@ Razorpay ──► POST /api/webhooks/razorpay (signature-checked, no Clerk auth
 | `payment_orders` (0002, added 2026-10-14; product column in 0008/0009) | `user_id`, `room_id` (no FK), `order_id` unique, `payment_id` unique, `status` (`created`/`paid`/`failed`/`fulfilment_failed`/`refunded`), `amount`, `currency`, `product` (`connect`/`extend`/`reveal`) | none (service role only) | none |
 | `webhook_events` (0003, added 2026-10-14) | `event_id` primary key (Razorpay event id), `event`, `order_id`, `payment_id` (no FKs), `outcome`, `received_at` | none (service role only) | none |
 | `push_subscriptions` (0006, added 2026-10-14) | `user_id` FK → `users.clerk_id` (cascade delete), `endpoint` unique, `p256dh`, `auth`, `updated_at` | none (service role only) | none |
+| `reports` (0010, added 2026-10-15) | `id`, `reporter_id`, `reported_id` (both FK → `users.clerk_id`, cascade), `reason` (≤ 500 characters), `created_at`; no self-report | none (service role only) | none |
 | `blocks` (0010, added 2026-10-15) | `blocker_id`, `blocked_id` (both FK → `users.clerk_id`, cascade), `created_at`; primary key (`blocker_id`, `blocked_id`); no self-block | none (service role only) | none |
 | `admin_actions` (0007, added 2026-10-14) | `admin_id`, `action` (`view_roster`/`remove_user`/`block_user`/`remove_room`), `target`, `created_at`; append-only | none (service role only) | none |
 
@@ -836,8 +837,9 @@ Razorpay onboarding and product eligibility are **unresolved**. The ability to c
 
 #### SAFE-002 — Reporting and response
 - **Requirement:** A user can report a participant/conversation; reports are stored with the relevant messages; an owner reviews them; actions (warn, suspend, remove) exist and are recorded.
-- **Files:** `app/admin/*`, `lib/admin.ts` (actions only).
-- **Status:** Partial. Since 2026-10-14 an admin can remove a dancer, remove and block one, or remove a room, and each is recorded (ADMIN-002, ADMIN-003). Still missing: any way for a user to report, a review queue, warn/suspend, and a response-time target.
+- **Files:** `supabase/migrations/0010_blocks_reports.sql` (`reports`, keyed on `users.clerk_id`, service role only); `app/api/reports/route.ts`; `components/dashboard/Dashboard.tsx` (Report on each card, with a reason of up to 500 characters); `app/admin/*`, `lib/admin.ts` (removal actions).
+- **Status:** Partial. Since 2026-10-14 an admin can remove a dancer, remove and block one, or remove a room, and each is recorded (ADMIN-002, ADMIN-003). Since 2026-10-15 a dancer can report another from the dancer list: `POST /api/reports` (Zod-validated, 201, 5 a minute per user, 400 for yourself or a malformed body, 404 for an unknown dancer, 503 before migration 0010; the reason is never logged). The request asked for uuid columns; they are Clerk ids, as for blocks (SAFE-001). Reports are not stored with the conversation's messages, and deleting either dancer's profile deletes their reports (DEC-006 open). Still missing: reporting from inside a chat, a review queue (reports are read in the SQL editor for now), warn/suspend, and a response-time target.
+- **Evidence (2026-10-15):** `tests/reports.test.ts` (route level, mocked database; passed locally). Migration 0010 not run in Postgres; the dashboard form not exercised in a browser.
 - **Depends on:** DATA-001, DEC-006 (retention of reported content).
 - **Acceptance:** Report flow end-to-end; documented response time target.
 - **Evidence:** Test + runbook.
@@ -1166,7 +1168,7 @@ Status abbreviations: **V** Verified (scope in brackets, e.g. unit/route level) 
 | ID-003 | Informed, scoped, revocable | `ConsentBanner.tsx`, 0006/0008 timestamps | P | review; smoke | Revocation (open gap); field choice | DEC-002, DEC-012 |
 | ID-004 | Mutual-exchange option | `lib/consent.ts` | P | `tests/consent-flow.test.ts` | Field choice; decide on ID-004 free mutual scope | ID-001, DEC-002 |
 | SAFE-001 | Blocking | `lib/blocks.ts`, `app/api/blocks/**`, `loadRoom`, `/api/users`, `Dashboard.tsx`, migration 0010 | IU (route, mocked DB) | `tests/blocks.test.ts` | Apply 0010; unblock screen; browser check | DATA-001 |
-| SAFE-002 | Reporting | `app/admin/*` (removal actions only) | P | test + runbook | Build user reporting and a review queue | DATA-001 |
+| SAFE-002 | Reporting | `app/api/reports/route.ts`, `Dashboard.tsx`, migration 0010, `app/admin/*` (removal) | P | `tests/reports.test.ts` | Apply 0010; review queue; report from chat with messages | DATA-001, DEC-006 |
 | SAFE-003 | 18+ self-declaration at onboarding | `OnboardingModal.tsx`, `actions.ts` | M | TEST-003, TEST-007 | Build | DATA-001; GATE-008 |
 | SAFE-004 | Abuse prevention | — | M | refs | — | CHAT-004/007 |
 | ADMIN-001 | Admin console access | `lib/admin.ts`, `app/admin/*`, `middleware.ts` | IU | `tests/admin.test.ts`; signed-out 404 probe | Signed-in run as admin and non-admin | AUTH-001, DEC-011 |
