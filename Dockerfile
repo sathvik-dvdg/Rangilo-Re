@@ -10,7 +10,7 @@
 #   docker run -p 3000:3000 --env-file <server env file> garbaconnect
 
 # ---- Stage 1: install and build ----
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 # Next's SWC compiler needs glibc compatibility on Alpine.
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
@@ -47,7 +47,7 @@ ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY \
 RUN npm run build
 
 # ---- Stage 2: run ----
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 WORKDIR /app
 # HOSTNAME: Docker sets it to the container id, which would stop the server listening on all interfaces.
 ENV NODE_ENV=production \
