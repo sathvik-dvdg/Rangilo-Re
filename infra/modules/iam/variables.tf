@@ -26,20 +26,10 @@ variable "log_group_arn" {
 }
 
 variable "asg_name" {
-  description = "Auto Scaling group the deploy role may refresh."
+  description = "Auto Scaling group the deploy user may refresh."
   type        = string
 }
 
 variable "alert_topic_arn" {
   type = string
-}
-
-variable "github_repository" {
-  description = "owner/name of the repository whose workflows may deploy."
-  type        = string
-}
-
-variable "github_environment" {
-  description = "GitHub Environment the deploy job must run in (staging or production)."
-  type        = string
 }

@@ -19,14 +19,14 @@ The app's browsers talk to Supabase Realtime directly; EC2 serves pages and `/ap
 
 | Path | What it holds |
 |---|---|
-| `bootstrap/` | State bucket, GitHub OIDC provider, the Route 53 zone (shared by both environments), the Terraform CI roles. Applied by hand, once. Local state. |
+| `bootstrap/` | State bucket and the Route 53 zone (shared by both environments). Applied by hand, once. Local state. |
 | `modules/network` | VPC, 2 AZs, public and private subnets, 1 NAT gateway. |
 | `modules/dns_cert` | ACM certificate for one hostname, validated in the shared zone. |
 | `modules/alb` | Load balancer, HTTPS listener (TLS 1.2+), HTTP→HTTPS redirect, target group. |
 | `modules/app` | Launch template (AL2023, IMDSv2 with hop limit 1, encrypted gp3), ASG, CPU target tracking, boot script. |
 | `modules/ecr` | Image repository per environment, scan on push, immutable tags, keep 20. |
 | `modules/config` | SSM parameters, created as placeholders. |
-| `modules/iam` | Instance role and the GitHub deploy role. |
+| `modules/iam` | Instance role, and the deploy user whose access key deploy.yml uses. |
 | `modules/observability` | Log group (30 days), SNS alert topic, alarms. |
 | `modules/waf` | Managed rules + per-IP rate limit. `enable_waf = false` by default. |
 | `envs/staging`, `envs/prod` | Identical `main.tf`; differences in `terraform.tfvars` and the state key. |
@@ -68,11 +68,9 @@ and for each environment its own Clerk instance and Supabase project (DEP-001).
    `dig NS garbaconnect.online +short` returns them (minutes to hours). Certificates cannot
    validate before this.
 
-3. **GitHub settings** (repository → Settings):
-   - Environments: create `staging`, `production` (add required reviewers), and
-     `infrastructure` (add required reviewers).
-   - Repository variables: `TF_PLAN_ROLE_ARN`, `TF_APPLY_ROLE_ARN` (bootstrap outputs),
-     and optionally `ALERT_EMAIL`.
+3. **GitHub Environments** (repository → Settings → Environments): create `staging` and
+   `production` (add required reviewers to `production`). Terraform is run by hand, with your
+   own administrator credentials (`AWS_PROFILE`); there is no Terraform CI.
 
 4. **Create staging up to, but not including, the instances**, so no instance boots before
    an image exists:
@@ -90,8 +88,16 @@ and for each environment its own Clerk instance and Supabase project (DEP-001).
    ```
    Then confirm the alert subscription email AWS sends.
 
-6. **Set the staging GitHub Environment variables** from `terraform output`:
-   `AWS_DEPLOY_ROLE_ARN`, `ALERT_TOPIC_ARN`, `APP_URL`.
+6. **Give deploy.yml its credentials.** Create an access key for this environment's deploy
+   user (`terraform output deploy_user_name`); the secret is shown once:
+   ```sh
+   aws iam create-access-key --user-name garbaconnect-staging-github-deploy
+   ```
+   In the `staging` GitHub Environment add the secrets `AWS_ACCESS_KEY_ID` and
+   `AWS_SECRET_ACCESS_KEY`, and the variables `ALERT_TOPIC_ARN` and `APP_URL` from
+   `terraform output`. Use Environment secrets, not repository secrets: each environment then
+   holds a key that can only touch its own resources, so a staging deploy cannot change prod.
+   Rotate a key with `create-access-key`, update the secret, then `delete-access-key` the old one.
 
 7. **Push the first image**, then create the rest:
    ```sh
@@ -119,8 +125,9 @@ and for each environment its own Clerk instance and Supabase project (DEP-001).
   --preferences '{"MinHealthyPercentage":100,"MaxHealthyPercentage":200}'`.
 - **Shell on an instance:** `aws ssm start-session --target <instance-id>` (no SSH).
 - **Logs:** CloudWatch log group `/garbaconnect/<env>/app`, one stream per instance.
-- **Infrastructure change:** open a PR touching `infra/`; terraform.yml posts the plan for both
-  environments; after merge, approve the `infrastructure` environment to apply staging then prod.
+- **Infrastructure change:** run `terraform plan` and `terraform apply` by hand in
+  `envs/staging`, check staging, then `envs/prod`. `terraform fmt -recursive` and
+  `terraform validate` before committing.
 - **Change a secret:** `aws ssm put-parameter --overwrite …`, then start an instance refresh
   (instances read parameters only at boot).
 
@@ -129,7 +136,8 @@ and for each environment its own Clerk instance and Supabase project (DEP-001).
 - One NAT gateway per environment: losing its zone cuts the instances' internet access.
 - Rate limits are per instance; sticky sessions keep each browser on one instance, which is
   what makes the per-user limits hold (CHAT-007). Instance replacement resets them.
-- `terraform-plan` reads with `ReadOnlyAccess`; `terraform-apply` has `AdministratorAccess`,
-  limited by its trust policy to approved runs of this repository.
+- deploy.yml uses a long-lived access key per environment (repository decision, 2026-10-15),
+  limited to that environment's image repository, image_tag, Auto Scaling group and alert
+  topic. Rotate it periodically; a leaked key can deploy any image to that environment.
 - `deploy.yml` builds one image per environment, since `NEXT_PUBLIC_*` values are baked in.
 - Not built: browser smoke test (Part B), load test, migration automation, WAF tuning.

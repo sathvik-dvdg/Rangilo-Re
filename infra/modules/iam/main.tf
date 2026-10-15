@@ -1,11 +1,13 @@
-# Two roles per environment:
+# Two identities per environment:
 #
 #   instance role  what the app instances may do: pull this environment's image,
 #                  read this environment's parameters, write their logs, and be
 #                  reached through Session Manager (no SSH).
-#   deploy role    what deploy.yml may do, assumed through GitHub OIDC from a job in
-#                  one GitHub Environment: push images, read the build-time public
-#                  parameters, set image_tag, refresh the Auto Scaling group, alert.
+#   deploy user    what deploy.yml may do with the access key stored in GitHub: push
+#                  images, read the build-time public parameters, set image_tag,
+#                  refresh the Auto Scaling group, alert. Nothing else, and only in
+#                  this environment. Terraform does not create the access key (it
+#                  would land in state); create it with the AWS CLI (infra/README.md).
 
 terraform {
   required_version = ">= 1.11.0"
@@ -21,10 +23,6 @@ terraform {
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 data "aws_partition" "current" {}
-
-data "aws_iam_openid_connect_provider" "github" {
-  url = "https://token.actions.githubusercontent.com"
-}
 
 locals {
   account_id      = data.aws_caller_identity.current.account_id
@@ -106,38 +104,11 @@ resource "aws_iam_instance_profile" "instance" {
   role = aws_iam_role.instance.name
 }
 
-# ---------------------------------------------------------------- deploy role
+# ---------------------------------------------------------------- deploy user
 
-data "aws_iam_policy_document" "github_trust" {
-  statement {
-    actions = ["sts:AssumeRoleWithWebIdentity"]
-
-    principals {
-      type        = "Federated"
-      identifiers = [data.aws_iam_openid_connect_provider.github.arn]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "token.actions.githubusercontent.com:aud"
-      values   = ["sts.amazonaws.com"]
-    }
-
-    # Only a job that declares this GitHub Environment (staging, or production with
-    # required reviewers) in this repository can deploy here.
-    condition {
-      test     = "StringEquals"
-      variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:environment:${var.github_environment}"]
-    }
-  }
-}
-
-resource "aws_iam_role" "deploy" {
-  name                 = "${var.name}-github-deploy"
-  description          = "deploy.yml for ${var.name}"
-  assume_role_policy   = data.aws_iam_policy_document.github_trust.json
-  max_session_duration = 3600
+resource "aws_iam_user" "deploy" {
+  name = "${var.name}-github-deploy"
+  tags = { Purpose = "deploy.yml access key for ${var.name}" }
 }
 
 data "aws_iam_policy_document" "deploy" {
@@ -194,8 +165,8 @@ data "aws_iam_policy_document" "deploy" {
   }
 }
 
-resource "aws_iam_role_policy" "deploy" {
+resource "aws_iam_user_policy" "deploy" {
   name   = "deploy"
-  role   = aws_iam_role.deploy.id
+  user   = aws_iam_user.deploy.name
   policy = data.aws_iam_policy_document.deploy.json
 }

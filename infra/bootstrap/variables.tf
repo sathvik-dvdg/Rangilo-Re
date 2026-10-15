@@ -15,15 +15,3 @@ variable "domain_name" {
   type        = string
   default     = "garbaconnect.online"
 }
-
-variable "github_repository" {
-  description = "owner/name of the GitHub repository whose workflows may assume the Terraform roles."
-  type        = string
-  default     = "sathvik-dvdg/Rangilo-Re"
-}
-
-variable "terraform_apply_environment" {
-  description = "GitHub Environment (with required reviewers) that terraform.yml's apply job runs in."
-  type        = string
-  default     = "infrastructure"
-}

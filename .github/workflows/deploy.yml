@@ -2,7 +2,9 @@
 #   push to preproduction -> staging    (GitHub Environment "staging")
 #   push to main          -> prod       (GitHub Environment "production", required reviewers)
 #
-# Repository secrets: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY (an IAM user's access key).
+# Secrets AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY: the access key of that environment's deploy
+# user (infra output deploy_user_name). Store them as Environment secrets so each environment's
+# key can only touch its own resources; an Environment secret overrides a repository secret.
 # Each GitHub Environment needs these variables (outputs of infra/envs/<env>):
 #   ALERT_TOPIC_ARN       alert_topic_arn
 #   APP_URL               app_url

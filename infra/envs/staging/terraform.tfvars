@@ -6,4 +6,3 @@ min_size            = 2
 max_size            = 4
 deletion_protection = false
 enable_waf          = false
-github_environment  = "staging"

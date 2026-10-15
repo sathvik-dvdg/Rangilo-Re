@@ -70,8 +70,6 @@ module "iam" {
   log_group_arn               = module.observability.log_group_arn
   asg_name                    = local.name
   alert_topic_arn             = module.observability.alert_topic_arn
-  github_repository           = var.github_repository
-  github_environment          = var.github_environment
 }
 
 module "app" {

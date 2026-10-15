@@ -5,9 +5,9 @@ output "app_url" {
   value       = "https://${var.domain_name}"
 }
 
-output "deploy_role_arn" {
-  description = "GitHub Environment variable AWS_DEPLOY_ROLE_ARN."
-  value       = module.iam.deploy_role_arn
+output "deploy_user_name" {
+  description = "Create its access key with the AWS CLI and store it as this environment's GitHub secrets."
+  value       = module.iam.deploy_user_name
 }
 
 output "alert_topic_arn" {

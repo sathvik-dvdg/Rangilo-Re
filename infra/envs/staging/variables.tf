@@ -57,13 +57,3 @@ variable "alert_email" {
   type        = string
   default     = ""
 }
-
-variable "github_repository" {
-  type    = string
-  default = "sathvik-dvdg/Rangilo-Re"
-}
-
-variable "github_environment" {
-  description = "GitHub Environment deploy.yml runs in for this environment."
-  type        = string
-}
