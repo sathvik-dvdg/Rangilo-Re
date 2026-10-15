@@ -22,6 +22,8 @@ import type { Message, RoomState } from '@/lib/types';
 
 // Openers offered in an empty room; tapping one fills the composer without sending.
 const ICEBREAKERS = ['Hi! 👋', 'Where are you on the floor?', 'What are you wearing tonight?'];
+// The composer grows with its text up to five lines (20px each + 20px padding), then scrolls.
+const COMPOSER_MAX_PX = 120;
 
 export function ChatRoom({ initial, billingEnabled }: { initial: RoomState; billingEnabled: boolean }) {
   const { roomId, me, partner } = initial;
@@ -42,7 +44,16 @@ export function ChatRoom({ initial, billingEnabled }: { initial: RoomState; bill
   const [toast, setToast] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
-  const composer = useRef<HTMLInputElement>(null);
+  const composer = useRef<HTMLTextAreaElement>(null);
+
+  // Fit the composer to its text: on typing (before paint) and whenever the text is set in code
+  // (cleared after sending, restored after a failed send, filled from an icebreaker).
+  const fitComposer = useCallback(() => {
+    const el = composer.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_PX)}px`;
+  }, []);
 
   // Opening the chat clears this partner's unread badge (NOTIF-001), once the tab is actually on screen.
   const clearUnread = useAppStore((s) => s.clearUnread);
@@ -203,6 +214,15 @@ export function ChatRoom({ initial, billingEnabled }: { initial: RoomState; bill
     composer.current?.focus();
   };
 
+  useEffect(fitComposer, [text, fitComposer]);
+
+  // Enter sends, as before; Shift+Enter starts a new line. Not while an IME is composing a character.
+  const onComposerKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return;
+    e.preventDefault();
+    e.currentTarget.form?.requestSubmit();
+  };
+
   return (
     // Phone: the chat fills the screen. Laptop: a centred chat panel beside a partner and room panel.
     <main className="relative flex h-[100dvh] flex-col overflow-hidden bg-ink lg:flex-row lg:justify-center lg:gap-6 lg:p-6">
@@ -306,19 +326,24 @@ export function ChatRoom({ initial, billingEnabled }: { initial: RoomState; bill
                 {sendError}
               </p>
             )}
-            <div className="mx-auto flex max-w-2xl items-center gap-2 rounded-full border border-paper/15 bg-ink p-1.5 pl-5 transition-colors focus-within:border-haldi">
-              <input
+            <div className="mx-auto flex max-w-2xl items-end gap-2 rounded-[26px] border border-paper/15 bg-ink p-1.5 pl-5 transition-colors focus-within:border-haldi">
+              <textarea
                 ref={composer}
                 value={text}
-                onChange={(e) => setText(e.target.value)}
+                onChange={(e) => {
+                  setText(e.target.value);
+                  fitComposer();
+                }}
+                onKeyDown={onComposerKey}
+                rows={1}
                 maxLength={1000}
                 aria-label="Message"
                 autoComplete="off"
                 enterKeyHint="send"
                 placeholder={`Message ${firstName}…`}
-                className="h-10 min-w-0 flex-1 bg-transparent text-[15px] text-paper placeholder:text-paper/35 focus:outline-none disabled:cursor-not-allowed"
+                className="block h-10 min-w-0 flex-1 resize-none bg-transparent py-2.5 text-[15px] leading-5 text-paper placeholder:text-paper/35 focus:outline-none"
               />
-              {text.length > 900 && <span className="tabular shrink-0 text-[11px] text-paper/45">{1000 - text.length}</span>}
+              {text.length > 900 && <span className="tabular shrink-0 self-center text-[11px] text-paper/45">{1000 - text.length}</span>}
               <motion.button
                 whileTap={{ scale: 0.9 }}
                 type="submit"

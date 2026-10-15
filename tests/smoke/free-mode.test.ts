@@ -119,7 +119,8 @@ describe('Free Mode smoke (in-process, providers mocked)', () => {
     room.state = roomState();
     const html = await renderChat();
     expect(html).toContain('GarbaKing_Arjun_7302');
-    expect(html).toContain('aria-label="Message"');
+    // A textarea, so long messages wrap onto new lines instead of scrolling sideways.
+    expect(html).toMatch(/<textarea[^>]*aria-label="Message"/);
     for (const pattern of PAYMENT_UI) expect(html).not.toMatch(pattern);
     expect(html).not.toMatch(/2-minute|Chat closes in|Clock starts/);
   });
