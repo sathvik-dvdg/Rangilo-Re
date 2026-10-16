@@ -119,7 +119,9 @@ describe('Free Mode: no payment claims on the policy pages (FREE-003, PRIV-006)'
 
   it('Privacy names no payment data and no payment provider, and still names every other service', () => {
     expect(freePrivacy).not.toMatch(PAYMENT);
-    for (const service of ['Clerk', 'Supabase', 'push service']) expect(freePrivacy).toContain(service);
+    for (const service of ['Vercel', 'Clerk', 'Supabase', 'push service']) expect(freePrivacy).toContain(service);
+    expect(freePrivacy).toMatch(/Vercel<\/strong>, which hosts the app and counts page visits/);
+    expect(freePrivacy).toMatch(/It uses no cookies and does not identify you/);
     expect(freePrivacy).toMatch(/where your profile and messages are stored/);
     expect(freePrivacy).toMatch(link('/terms'));
   });

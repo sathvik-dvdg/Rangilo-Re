@@ -27,6 +27,20 @@ export function timeAgo(iso: string) {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+/**
+ * Orders a refetched dancer list like the one already on screen: dancers who were shown
+ * keep their places, newcomers go first in server order. Data comes from `next`. The
+ * server sorts by last_seen, which every heartbeat changes, so without this each refetch
+ * reshuffled the list under the user.
+ */
+export function keepOrder<T extends { clerk_id: string }>(prev: T[] | null, next: T[]): T[] {
+  if (!prev) return next;
+  const place = new Map(prev.map((u, i) => [u.clerk_id, i]));
+  const newcomers = next.filter((u) => !place.has(u.clerk_id));
+  const known = next.filter((u) => place.has(u.clerk_id)).sort((a, b) => place.get(a.clerk_id)! - place.get(b.clerk_id)!);
+  return [...newcomers, ...known];
+}
+
 /** Deterministic pair of palette colours for an avatar, keyed by name. */
 const AVATAR_PAIRS: [string, string][] = [
   ['#B23A2E', '#D8A23A'],

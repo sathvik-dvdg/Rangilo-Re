@@ -96,6 +96,10 @@ export default function PrivacyPage() {
       <Section title="Services we use">
         <ul className="list-disc space-y-2 pl-5">
           <li>
+            <strong className="text-paper">Vercel</strong>, which hosts the app and counts page visits (which pages are viewed, and the
+            country, device type and browser). It uses no cookies and does not identify you.
+          </li>
+          <li>
             <strong className="text-paper">Clerk</strong>, for sign-in and your account, including your profile photo.
           </li>
           <li>

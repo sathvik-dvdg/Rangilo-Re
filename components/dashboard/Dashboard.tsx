@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@clerk/nextjs';
 import { motion } from 'framer-motion';
-import { FixedSizeList, type ListChildComponentProps } from 'react-window';
+import { FixedSizeList, type ListChildComponentProps, type ListOnScrollProps } from 'react-window';
 import { Ban, EllipsisVertical, Flag, Search, Lock, Shield } from 'lucide-react';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/button';
@@ -17,7 +17,7 @@ import { OnboardingModal } from './OnboardingModal';
 import { useLobbyPresence } from '@/hooks/useLobbyPresence';
 import { useAppStore } from '@/store/useAppStore';
 import { roomIdFor } from '@/lib/room';
-import { cn, timeAgo } from '@/lib/utils';
+import { cn, keepOrder, timeAgo } from '@/lib/utils';
 import { VIBE_TAGS, type MyProfile, type PublicProfile, type RevealedIdentity } from '@/lib/types';
 
 type Filter = 'all' | 'female' | 'male' | 'online';
@@ -41,10 +41,33 @@ const LONG_PRESS_MS = 500;
 const ROW_TWO_UP = 116;
 const DESKTOP_QUERY = '(min-width: 1024px)';
 const TWO_COLUMN_MIN_WIDTH = 680;
+/** Cards slide in only for this long after the list first appears (longest stagger plus the slide). */
+const INTRO_MS = 1000;
+/** Phone: the list must move this far (px) in one direction to fold the header away or bring it back. */
+const TUCK_SLOP = 24;
+/** Scroll events while the header folds are the list resizing, not the user. */
+const TUCK_SETTLE_MS = 400;
+
+/** Phone: folds its content away while the dancer list is scrolled down. Never folds on laptop. */
+function Tuck({ hidden, children }: { hidden: boolean; children: React.ReactNode }) {
+  return (
+    <motion.div
+      data-tuck
+      initial={false}
+      animate={hidden ? { height: 0, opacity: 0, transitionEnd: { visibility: 'hidden' } } : { height: 'auto', opacity: 1, visibility: 'visible' }}
+      transition={{ duration: 0.22, ease: 'easeOut' }}
+      className="shrink-0 overflow-hidden"
+    >
+      {children}
+    </motion.div>
+  );
+}
 
 type RowData = {
   rows: PublicProfile[][];
   cols: number;
+  /** True only while the first load's slide-in plays; rows mounted later appear in place. */
+  animateIn: boolean;
   onlineIds: Set<string>;
   /** Dancers who agreed to share their name (and optionally photo) with this viewer. */
   revealed: Record<string, RevealedIdentity>;
@@ -112,7 +135,7 @@ function DancerCard({ u, index, data }: { u: PublicProfile; index: number; data:
   return (
     <div ref={card} className="group relative min-w-0">
       <motion.button
-        initial={{ opacity: 0, x: -20 }}
+        initial={data.animateIn ? { opacity: 0, x: -20 } : false}
         animate={{ opacity: 1, x: 0 }}
         transition={{ delay: Math.min(index, 15) * 0.04 }}
         onClick={() => {
@@ -363,8 +386,9 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
       fetch('/api/users', { cache: 'no-store' })
         .then((r) => (r.ok ? r.json() : null))
         .then((d: { users?: PublicProfile[] } | null) => {
-          if (!d?.users) return;
-          setUsers(d.users);
+          const next = d?.users;
+          if (!next) return;
+          setUsers((prev) => keepOrder(prev, next));
           setError(null);
         })
         .catch(() => {})
@@ -432,6 +456,63 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
     return () => mq.removeEventListener('change', sync);
   }, []);
   const cols = desktop && size.width >= TWO_COLUMN_MIN_WIDTH ? 2 : 1;
+  const rowHeight = cols === 2 ? ROW_TWO_UP : ROW;
+  const contentHeight = Math.ceil(visible.length / cols) * rowHeight;
+
+  // Cards slide in once, when the list first appears. Rows mounted later (scrolling, or a
+  // refresh moving dancers between rows) appear in place; replaying the slide there made the list jump.
+  const [animateIn, setAnimateIn] = useState(true);
+  const listShown = users !== null;
+  useEffect(() => {
+    if (!listShown) return;
+    const id = window.setTimeout(() => setAnimateIn(false), INTRO_MS);
+    return () => window.clearTimeout(id);
+  }, [listShown]);
+
+  // Phone: scrolling the list down folds the profile panel, extra filters and notice away to
+  // give the dancers the screen; scrolling up brings them back.
+  const [tucked, setTucked] = useState(false);
+  const page = useRef<HTMLElement>(null);
+  const tuckState = useRef({ offset: 0, tucked: false, settleUntil: 0 });
+  const tuck = useCallback((next: boolean) => {
+    const s = tuckState.current;
+    if (s.tucked === next) return;
+    s.tucked = next;
+    // Folding resizes the list, which can move its scroll position; don't read that as the user.
+    s.settleUntil = performance.now() + TUCK_SETTLE_MS;
+    setTucked(next);
+  }, []);
+  const onListScroll = useCallback(
+    ({ scrollOffset, scrollUpdateWasRequested }: ListOnScrollProps) => {
+      const s = tuckState.current;
+      if (scrollUpdateWasRequested || performance.now() < s.settleUntil) {
+        s.offset = scrollOffset;
+        return;
+      }
+      if (scrollOffset <= TUCK_SLOP) {
+        s.offset = scrollOffset;
+        tuck(false);
+        return;
+      }
+      const moved = scrollOffset - s.offset;
+      if (Math.abs(moved) < TUCK_SLOP) return;
+      s.offset = scrollOffset;
+      if (moved < 0) {
+        tuck(false);
+        return;
+      }
+      // Fold only if the list still needs scrolling once it grows; otherwise it would fit, unfold and flicker.
+      const foldable = Array.from(page.current?.querySelectorAll<HTMLElement>('[data-tuck]') ?? []).reduce((h, el) => h + el.offsetHeight, 0);
+      if (contentHeight > size.height + foldable + TUCK_SLOP) tuck(true);
+    },
+    [tuck, contentHeight, size.height],
+  );
+  // A list short enough to fit can't be scrolled up, so it must never stay folded.
+  const listFits = contentHeight <= size.height;
+  useEffect(() => {
+    if (listFits || desktop) tuck(false);
+  }, [listFits, desktop, tuck]);
+  const hideHeader = tucked && !desktop;
 
   const itemData = useMemo<RowData>(() => {
     const rows: PublicProfile[][] = [];
@@ -439,6 +520,7 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
     return {
       rows,
       cols,
+      animateIn,
       onlineIds,
       revealed,
       incoming,
@@ -447,7 +529,7 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
       block: (u) => void blockDancer(u),
       report: openReport,
     };
-  }, [visible, cols, onlineIds, revealed, incoming, unread, userId, router, blockDancer, openReport]);
+  }, [visible, cols, animateIn, onlineIds, revealed, incoming, unread, userId, router, blockDancer, openReport]);
 
   const lobbyNotice = (
     <div className="flex items-center gap-2 rounded-xl border border-haldi/20 bg-ink-2/80 px-3.5 py-2 text-xs text-paper/75 shadow-sm lg:bg-ink/60">
@@ -461,11 +543,17 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
   );
 
   return (
-    <main className="flex h-[100dvh] flex-col bg-ink pt-16">
+    <main ref={page} className="flex h-[100dvh] flex-col bg-ink pt-16">
       {me && (
         // Phone: profile, filters and list stacked. Laptop: profile panel on the left, dancers on the right.
         <div className="mx-auto flex min-h-0 w-full flex-1 flex-col lg:max-w-6xl lg:flex-row lg:gap-6 lg:px-6 lg:py-6">
-          <aside className="stitch-b shrink-0 bg-ink-2 lg:w-[300px] lg:self-start lg:rounded-2xl lg:border lg:border-solid lg:border-paper/10 xl:w-[340px]">
+          <aside
+            className={cn(
+              'stitch-b shrink-0 bg-ink-2 lg:w-[300px] lg:self-start lg:rounded-2xl lg:border lg:border-solid lg:border-paper/10 xl:w-[340px]',
+              hideHeader && 'border-b-0',
+            )}
+          >
+            <Tuck hidden={hideHeader}>
             <div className="relative mx-auto max-w-3xl px-4 py-4 sm:px-6 lg:max-w-none lg:p-5">
               {/* On laptop the panel is narrow, so the edit button sits beside the avatar instead of among the tags. */}
               <button
@@ -531,12 +619,13 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
               </dl>
               <div className="mt-3 hidden lg:block">{lobbyNotice}</div>
             </div>
+            </Tuck>
           </aside>
 
           <CampusEnergyBattle users={users} onlineIds={onlineIds} me={me} />
 
           <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="mx-auto w-full max-w-3xl px-4 pt-5 sm:px-6 lg:max-w-none lg:px-0 lg:pt-0">
+          <div className={cn('mx-auto w-full max-w-3xl px-4 transition-[padding] duration-200 sm:px-6 lg:max-w-none lg:px-0 lg:pt-0', hideHeader ? 'pt-3' : 'pt-5')}>
             <div className="mb-4 hidden items-baseline justify-between gap-4 lg:flex">
               <h1 className="font-display text-2xl text-paper">On the floor tonight</h1>
               {users && (
@@ -578,6 +667,7 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
             </div>
 
             {/* Department, Year & Vibe filters */}
+            <Tuck hidden={hideHeader}>
             <div className="mt-2.5 flex items-center gap-2 overflow-x-auto pb-1 text-xs">
               <select
                 value={selectedBranch}
@@ -633,10 +723,13 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
                 </button>
               )}
             </div>
+            </Tuck>
           </div>
 
           {/* Lobby Locked Profiles Notice (in the side panel on laptop screens) */}
-          <div className="mx-auto w-full max-w-3xl px-4 pt-3 sm:px-6 lg:hidden">{lobbyNotice}</div>
+          <Tuck hidden={hideHeader}>
+            <div className="mx-auto w-full max-w-3xl px-4 pt-3 sm:px-6 lg:hidden">{lobbyNotice}</div>
+          </Tuck>
 
           <div ref={listWrap} className="mx-auto mt-2 min-h-0 w-full max-w-3xl flex-1 overflow-hidden px-3 sm:px-5 lg:mt-3 lg:max-w-none lg:px-0">
             {error ? (
@@ -665,8 +758,9 @@ export function Dashboard({ me, suggestedName }: { me: MyProfile | null; suggest
                 height={size.height}
                 width="100%"
                 itemCount={itemData.rows.length}
-                itemSize={cols === 2 ? ROW_TWO_UP : ROW}
+                itemSize={rowHeight}
                 itemData={itemData}
+                onScroll={desktop ? undefined : onListScroll}
                 itemKey={(i, d) => d.rows[i][0].clerk_id}
               >
                 {Row}

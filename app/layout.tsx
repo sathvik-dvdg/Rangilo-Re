@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 // Self-hosted via Fontsource so builds don't depend on reaching Google Fonts.
 import '@fontsource-variable/cinzel';
 import '@fontsource-variable/nunito';
+import Script from 'next/script';
 import { ClerkProvider } from '@clerk/nextjs';
 import { clerkAppearance } from '@/lib/clerkAppearance';
 import { getClerkConfigProblems } from '@/lib/clerkConfig';
@@ -41,6 +42,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <html lang="en">
         <body>
           <MotionPreferences>{children}</MotionPreferences>
+          {/* Vercel Web Analytics: page views only, no cookies, served from this site's own domain
+              (the CSP's 'self'). Loaded only on Vercel, where the endpoint exists. Not the
+              @vercel/analytics package: its optional SvelteKit peer breaks `npm install` here. */}
+          {process.env.VERCEL === '1' && <Script src="/_vercel/insights/script.js" strategy="afterInteractive" />}
         </body>
       </html>
     </ClerkProvider>
